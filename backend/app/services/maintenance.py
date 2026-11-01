@@ -9,6 +9,7 @@ from ..models import Device, EnvironmentDevice, LeaseResource, Lease, Maintenanc
 from ..state import device_occupancy, env_device_ids
 from . import WORKSPACE_ID, get_user, next_id, now, record_event, text_field
 from .environments import _get_env
+from .resource_locks import lock_resources
 
 
 def create_isolation_record(session: Session, *, actor_id: str, environment_ids: list[str],
@@ -30,6 +31,7 @@ def start(session: Session, actor_id: str, payload: dict) -> dict:
     """空闲环境进入维护；共享设备关联环境同步不可借（状态派生自动生效）。"""
     actor = get_user(session, actor_id)
     reason = text_field(payload.get("reason"), "维护原因", 200, required=True)
+    lock_resources(session, [payload.get("envId") or ""])
     env = _get_env(session, payload.get("envId") or "")
     occupancy = device_occupancy(session, WORKSPACE_ID)
     device_ids = env_device_ids(session, WORKSPACE_ID, env.id)
@@ -64,6 +66,7 @@ def verify(session: Session, actor_id: str, record_id: str, healthy: bool) -> di
     if not record or record.status not in ("maintenance", "isolated"):
         raise BusinessError("维护记录已结束。")
     # 有共享设备仍被其他租约占用时不能复核释放（docs/02）。
+    lock_resources(session, device_ids=record.device_ids or [])
     occupancy = device_occupancy(session, WORKSPACE_ID)
     scope = _scope_devices(session, record)
     external = [d.id for d in scope if d.id in occupancy]

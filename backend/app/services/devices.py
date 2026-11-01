@@ -7,6 +7,7 @@ from sqlalchemy.orm import Session
 from ..errors import BusinessError
 from ..models import Device, Environment, EnvironmentDevice
 from ..state import device_occupancy, device_status
+from .resource_locks import lock_resources
 from . import WORKSPACE_ID, check_platform, get_user, next_id, record_event, require_admin, text_field
 
 
@@ -28,6 +29,8 @@ def referencing_environments(session: Session, device_id: str) -> list[Environme
 def save_device(session: Session, actor_id: str, payload: dict) -> dict:
     """新增设备需管理员，编辑自助；忽略输入中的状态覆写；占用期间禁止编辑；隔离设备仅可改元数据。"""
     actor = get_user(session, actor_id)
+    if payload.get("id"):
+        lock_resources(session, device_ids=[payload["id"]])
     previous = _get_active(session, payload["id"]) if payload.get("id") else None
     isolated_metadata_only = False
     if previous and previous.lifecycle == "active":
@@ -77,6 +80,7 @@ def save_device(session: Session, actor_id: str, payload: dict) -> dict:
 def retire_device(session: Session, actor_id: str, device_id: str) -> dict:
     """移出设备：删除类危险操作，仅管理员；占用或仍被引用时拒绝。"""
     actor = require_admin(session, actor_id, "移出设备")
+    lock_resources(session, device_ids=[device_id])
     device = _get_active(session, device_id)
     occupancy = device_occupancy(session, device.workspace_id)
     if device.id in occupancy or device.operational_state != "idle":

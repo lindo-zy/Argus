@@ -27,6 +27,7 @@ from .services import maintenance as maintenance_service
 from .services import runs as run_service
 from .services import snapshot as snapshot_service
 from .services import users as user_service
+from .services.topology import save_topology as save_topology_service
 from .seed import is_empty, seed
 
 router = APIRouter(prefix="/api")
@@ -60,6 +61,12 @@ def reset_demo(session: Session = Depends(get_session), actor: str = Depends(act
     seed(session)
     session.commit()
     return {"result": {"reset": True}, "snapshot": snapshot_service.build_snapshot(session)}
+
+
+@router.post("/topology")
+def save_topology(payload: dict, session: Session = Depends(get_session),
+                  actor: str = Depends(actor_id_header)) -> dict:
+    return commit_and_respond(session, save_topology_service(session, actor, payload))
 
 
 # ---- 环境域 ----

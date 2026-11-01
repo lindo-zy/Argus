@@ -18,6 +18,7 @@ from ..models import (
 from ..state import device_occupancy, env_device_ids
 from . import WORKSPACE_ID, get_user, next_id, now, record_event
 from .leases import _borrow_failure
+from .resource_locks import lock_resources
 from .maintenance import create_isolation_record
 
 
@@ -37,6 +38,7 @@ def start_run(session: Session, actor_id: str, payload: dict) -> dict:
     if not version or version.status != "published":
         raise BusinessError("只有已发布配置可以启动任务。")
     definition = session.get(PipelineDefinition, version.definition_id)
+    lock_resources(session, [payload.get("envId") or ""])
     env = session.get(Environment, payload.get("envId") or "")
     if not env or env.lifecycle != "active":
         raise BusinessError("环境不存在，请刷新后重试。")

@@ -8,12 +8,14 @@ import ResourceEditor from './components/ResourceEditor.vue'
 import EnvironmentsView from './views/EnvironmentsView.vue'
 import DashboardView from './views/DashboardView.vue'
 import WorkspaceView from './views/WorkspaceView.vue'
+import TopologyView from './views/TopologyView.vue'
+import './topology.css'
 import { useTheme } from './composables/useTheme.js'
 import { createMockApi } from './mock/api.js'
 import { createHttpApi } from './api/createHttpApi.js'
 import { createSeed, enrichEnvironments, environmentIdsFor, deviceIdsFor } from './mock/seed.js'
 
-const navGroups = [{ label: '总览', items: [{ id: 'dashboard', label: '总览', icon: 'home' }] }, { label: '资源管理', items: [{ id: 'environments', label: '环境资源', icon: 'box' }, { id: 'devices', label: '设备资产', icon: 'monitor' }, { id: 'leases', label: '借用管理', icon: 'lock' }, { id: 'maintenance', label: '维护中心', icon: 'shield' }] }, { label: '流水线编排', items: [{ id: 'pipelines', label: '标准流水线', icon: 'flow' }, { label: '升级流水线', icon: 'download', planned: true }, { label: '性能流水线', icon: 'play', planned: true }] }, { label: '数据平台', items: [{ id: 'runs', label: '测试执行记录', icon: 'clipboard' }, { id: 'quality', label: '质量分析', icon: 'chart' }, { label: '性能数据看板', icon: 'pulse', planned: true }] }, { label: '平台管理', items: [{ id: 'people', label: '人员管理', icon: 'user', adminOnly: true }] }]
+const navGroups = [{ label: '总览', items: [{ id: 'dashboard', label: '总览', icon: 'home' }] }, { label: '资源管理', items: [{ id: 'environments', label: '环境资源', icon: 'box' }, { id: 'devices', label: '设备资产', icon: 'monitor' }, { id: 'topology', label: '环境拓扑', icon: 'flow' }, { id: 'leases', label: '借用管理', icon: 'lock' }, { id: 'maintenance', label: '维护中心', icon: 'shield' }] }, { label: '流水线编排', items: [{ id: 'pipelines', label: '标准流水线', icon: 'flow' }, { label: '升级流水线', icon: 'download', planned: true }, { label: '性能流水线', icon: 'play', planned: true }] }, { label: '数据平台', items: [{ id: 'runs', label: '测试执行记录', icon: 'clipboard' }, { id: 'quality', label: '质量分析', icon: 'chart' }, { label: '性能数据看板', icon: 'pulse', planned: true }] }, { label: '平台管理', items: [{ id: 'people', label: '人员管理', icon: 'user', adminOnly: true }] }]
 const navigation = navGroups.flatMap(g => g.items)
 const getPage = () => navigation.some(n => n.id === location.hash.slice(2)) ? location.hash.slice(2) : 'environments'
 const page = ref(getPage()), mobileOpen = ref(false)
@@ -26,6 +28,7 @@ try { storage = window.localStorage } catch { storage = null }
 // 优先连接真实后端；后端不可达时自动回退浏览器 Mock（离线演示模式）。
 const mockApi = createMockApi({ storage })
 let api = createHttpApi({ base: (typeof import.meta !== 'undefined' && import.meta.env?.VITE_API_BASE) || 'http://127.0.0.1:8000' })
+const topologyView = ref(null), dataMode = ref('http')
 const snapshot = ref(createSeed()), loading = ref(true), loadError = ref(''), busy = ref(false), modalError = ref('')
 const envs = computed(() => enrichEnvironments(snapshot.value))
 const poolSnapshot = computed(() => ({ ...snapshot.value, devices: snapshot.value.devices.filter(d => d.lifecycle !== 'retired') }))
@@ -71,13 +74,23 @@ const envName = id => snapshot.value.environments.find(e => e.id === id)?.name |
 const scopeName = record => environmentIdsFor(record).map(envName).join('、')
 function notify(message, tone = 'green') { clearTimeout(toastTimer); toast.value = { message, tone }; toastTimer = setTimeout(() => { toast.value = null }, 4500) }
 async function load() {
+  if (topologyView.value && !topologyView.value.canLeave()) return
   loading.value = true; loadError.value = ''
   try { const result = await api.load(); snapshot.value = result.snapshot; if (result.persistenceWarning) notify('本地存储不可用或数据已损坏，当前使用内存演示数据。', 'amber') }
   catch (error) {
-    if (error?.unavailable && api !== mockApi) { api = mockApi; notify('后端服务不可达，已切换到浏览器 Mock 演示模式。', 'amber'); return load() }
+    if (error?.unavailable && api !== mockApi) { api = mockApi; dataMode.value = 'mock'; notify('后端服务不可达，已切换到浏览器 Mock 演示模式。', 'amber'); return load() }
     loadError.value = error.message || '数据加载失败，请重试。'
   }
   finally { loading.value = false }
+}
+async function refreshTopology() {
+  const result = await api.load()
+  snapshot.value = result.snapshot
+}
+async function saveTopology(payload) {
+  const result = await api.saveTopology(payload)
+  snapshot.value = result.snapshot
+  return result
 }
 async function callApi(name, ...args) {
   if (typeof api[name] !== 'function') throw new Error('该功能需要连接后端服务（当前为浏览器 Mock 模式）。')
@@ -90,8 +103,8 @@ async function action(operation, message, close = true) {
   catch (error) { modalError.value = error.message || '操作未完成，请重试。' }
   finally { busy.value = false }
 }
-function navigate(id) { page.value = id; location.hash = `/${id}`; mobileOpen.value = false; searchOpen.value = false; modal.value = null }
-function routeChange() { page.value = getPage(); mobileOpen.value = false; presentation.value = false; window.scrollTo({ top: 0 }) }
+function navigate(id) { if (page.value === 'topology' && id !== 'topology' && topologyView.value && !topologyView.value.canLeave()) return; page.value = id; location.hash = `/${id}`; mobileOpen.value = false; searchOpen.value = false; modal.value = null }
+function routeChange() { if (page.value === 'topology' && getPage() !== 'topology' && topologyView.value && !topologyView.value.canLeave()) { location.hash = '/topology'; return } page.value = getPage(); mobileOpen.value = false; presentation.value = false; window.scrollTo({ top: 0 }) }
 function focusMain() { document.getElementById('main-content')?.focus() }
 watch(page, () => { document.title = `${currentTitle.value} · Argus` }, { immediate: true })
 // 人员管理仅管理员可见：普通人员直接输入 #/people 时重定向回环境资源。
@@ -293,7 +306,7 @@ onBeforeUnmount(() => { clearTimeout(toastTimer); window.removeEventListener('ha
     <button v-if="mobileOpen" class="sidebar-backdrop" aria-label="收起导航" @click="mobileOpen = false" />
     <aside class="sidebar" aria-label="主导航"><a class="brand" href="#/environments"><svg viewBox="0 0 48 48" aria-hidden="true"><path d="M24 3 43 14v20L24 45 5 34V14Z" fill="none" stroke="currentColor" stroke-width="3" /><path d="M11 24s5-9 13-9 13 9 13 9-5 9-13 9-13-9-13-9Z" fill="currentColor" opacity=".2" /><circle cx="24" cy="24" r="5" fill="currentColor" /></svg><div><strong>ARGUS</strong><span>操作系统测试平台</span></div></a>
       <nav><div class="nav-group" v-for="group in visibleNavGroups" :key="group.label"><div class="nav-label">{{ group.label }}</div><template v-for="item in group.items" :key="item.id || item.label"><span v-if="item.planned" class="nav-item planned" aria-disabled="true" :title="`${item.label}（规划中）`"><Icon :name="item.icon" :size="21" /><span>{{ item.label }}</span><i class="nav-plan-tag">规划中</i></span><a v-else :href="`#/${item.id}`" :class="['nav-item', { active: page === item.id }]" :aria-current="page === item.id ? 'page' : undefined" :title="item.label" @click="mobileOpen = false"><Icon :name="item.icon" :size="21" /><span>{{ item.label }}</span><i v-if="item.id === 'maintenance'" class="nav-notice" /></a></template></div></nav>
-      <div class="sidebar-bottom"><div class="workspace-chip"><span class="workspace-symbol">OS</span><div><strong>系统测试</strong><small>研发部 · 演示工作空间</small></div><Icon name="down" :size="15" /></div><button class="nav-item settings-button" aria-label="工作空间设置" @click="open('settings')"><Icon name="settings" :size="21" /><span>工作空间设置</span></button><div class="sidebar-version"><i class="dot teal" />LOCAL MOCK<span>v0.1.0</span></div></div>
+      <div class="sidebar-bottom"><div class="workspace-chip"><span class="workspace-symbol">OS</span><div><strong>系统测试</strong><small>研发部 · 演示工作空间</small></div><Icon name="down" :size="15" /></div><button class="nav-item settings-button" aria-label="工作空间设置" @click="open('settings')"><Icon name="settings" :size="21" /><span>工作空间设置</span></button><div class="sidebar-version"><i class="dot teal" />{{ dataMode === 'http' ? 'HTTP API' : 'LOCAL MOCK' }}<span>v0.1.0</span></div></div>
     </aside>
     <div class="app-main"><header class="topbar"><div class="breadcrumb"><button class="icon-button mobile-menu" aria-label="打开导航" :aria-expanded="mobileOpen" @click="mobileOpen = !mobileOpen"><Icon name="menu" /></button><Icon name="home" :size="17" /><span>{{ currentGroup }}</span><span class="breadcrumb-slash">/</span><strong>{{ currentTitle }}</strong></div>
       <div class="topbar-tools"><div class="global-search" @focusout="event => { if (!event.currentTarget.contains(event.relatedTarget)) searchOpen = false }"><label class="search-field"><Icon name="search" :size="17" /><input ref="searchInput" v-model="searchQuery" aria-label="全局搜索" placeholder="搜索环境、设备或任务…" @focus="searchOpen = true" @keydown.enter.prevent="searchResults[0] && pickSearch(searchResults[0])" /><kbd>⌘ K</kbd></label><div v-if="searchOpen && searchQuery.trim()" class="search-popover"><div class="search-popover-label">搜索结果</div><button v-for="result in searchResults" :key="result.id" @click="pickSearch(result)"><Icon :name="result.icon" :size="18" /><span><strong>{{ result.name }}</strong><small class="mono">{{ result.id }}</small></span><span class="subtle-note">{{ result.label }}</span></button><div v-if="!searchResults.length" class="search-no-result">未找到匹配的环境、设备或任务</div></div></div>
@@ -302,7 +315,8 @@ onBeforeUnmount(() => { clearTimeout(toastTimer); window.removeEventListener('ha
     <main id="main-content" class="page-content" tabindex="-1"><div v-if="loading" class="loading-state" role="status"><span class="spinner" /><h2>正在准备工作空间</h2><p>加载环境与执行数据…</p></div><div v-else-if="loadError" class="empty-state panel" role="alert"><Icon name="alert" :size="36" /><h2>暂时无法加载数据</h2><p>{{ loadError }}</p><button class="button primary" @click="load">重新加载</button></div><template v-else>
       <div v-show="page === 'environments'"><EnvironmentsView :envs="envs" :snapshot="poolSnapshot" :retired="retiredEnvs" :can-admin="isAdmin" :cols="listCols" @details="details" @borrow="borrow" @run="runDetails" @lease="leaseDetails" @navigate="navigate" @maintenance="maintenance" @create="editResource('environment')" @restore="confirmRestore" @timeline="openTimeline" @export="exportEnvironments" @events="openEvents" @col-toggle="toggleCol" @batch-operate="p => runBatch(p.kind, p.ids)" /></div>
       <div v-show="page === 'dashboard'"><DashboardView :envs="envs" :snapshot="poolSnapshot" :presentation="presentation" @navigate="navigate" @run="runDetails" @info="open('info')" @presentation="togglePresentation" /></div>
-      <WorkspaceView v-if="!['environments', 'dashboard'].includes(page)" :page="page" :envs="envs" :snapshot="poolSnapshot" :current-user="currentUser" :can-admin="isAdmin" @details="details" @run="runDetails" @lease="leaseDetails" @borrow="borrow" @maintenance="maintenance" @pipeline="pipeline" @issue="issue => open('issue', issue.id)" @device-create="editResource('device')" @device-edit="device => editResource('device', device)" @device-remove="device => confirmArchive('device', device)" @user-add="open('userAdd')" @user-role="(user, role) => action(() => api.setUserRole(user.id, role), `已将 ${user.name} 设为${roleLabel({ role })}。`)" @user-status="(user, status) => action(() => api.setUserStatus(user.id, status), `已${status === 'disabled' ? '停用' : '启用'} ${user.name}。`)" @user-switch="switchUser" />
+      <TopologyView v-if="page === 'topology'" ref="topologyView" :snapshot="poolSnapshot" :mode="dataMode" :save="saveTopology" :refresh="refreshTopology" @environment="details" @device="device => editResource('device', device)" />
+      <WorkspaceView v-if="!['environments', 'dashboard', 'topology'].includes(page)" :page="page" :envs="envs" :snapshot="poolSnapshot" :current-user="currentUser" :can-admin="isAdmin" @details="details" @run="runDetails" @lease="leaseDetails" @borrow="borrow" @maintenance="maintenance" @pipeline="pipeline" @issue="issue => open('issue', issue.id)" @device-create="editResource('device')" @device-edit="device => editResource('device', device)" @device-remove="device => confirmArchive('device', device)" @user-add="open('userAdd')" @user-role="(user, role) => action(() => api.setUserRole(user.id, role), `已将 ${user.name} 设为${roleLabel({ role })}。`)" @user-status="(user, status) => action(() => api.setUserStatus(user.id, status), `已${status === 'disabled' ? '停用' : '启用'} ${user.name}。`)" @user-switch="switchUser" />
       <footer class="app-footer"><span><i class="dot teal" />ARGUS · 本地演示工作空间</span><span>演示数据 · 未接入真实设备与外部系统</span><button class="text-button" @click="load"><Icon name="refresh" :size="13" />刷新数据</button></footer>
     </template></main></div>
   </div>

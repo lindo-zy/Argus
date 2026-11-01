@@ -15,6 +15,7 @@ from ..models import Device, Environment, EnvironmentDevice, LeaseResource, Leas
 from ..state import device_occupancy, device_status, env_device_ids, fmt_health
 from . import WORKSPACE_ID, check_platform, get_user, next_id, now, record_event, require_admin, text_field
 from .devices import _get_active as get_device
+from .resource_locks import lock_resources
 
 
 def _get_env(session: Session, env_id: str, include_retired: bool = False) -> Environment:
@@ -60,6 +61,9 @@ def _topology_set(session: Session, env: Environment, device_ids: list[str], act
 def save_environment(session: Session, actor_id: str, payload: dict) -> dict:
     """新增环境需管理员，编辑自助；保存即生效（含复制场景：copy_of 携带来源名）。"""
     actor = get_user(session, actor_id)
+    requested_ids = payload.get("deviceIds")
+    lock_resources(session, [payload["id"]] if payload.get("id") else [],
+                   requested_ids if isinstance(requested_ids, list) and all(isinstance(i, str) for i in requested_ids) else [])
     previous = _get_env(session, payload["id"]) if payload.get("id") else None
     if previous:
         _assert_editable(session, previous)
@@ -140,6 +144,7 @@ def _assert_editable(session: Session, env: Environment) -> None:
 def adjust_devices(session: Session, actor_id: str, env_id: str, add: list[str], remove: list[str]) -> dict:
     """详情内快速调整关联（P0）：逐项校验，整批一个校验上下文。"""
     actor = get_user(session, actor_id)
+    lock_resources(session, [env_id], add if isinstance(add, list) and all(isinstance(i, str) for i in add) else [])
     env = _get_env(session, env_id)
     _assert_editable(session, env)
     current = env_device_ids(session, WORKSPACE_ID, env.id)
@@ -164,6 +169,7 @@ def adjust_devices(session: Session, actor_id: str, env_id: str, add: list[str],
 def archive_environment(session: Session, actor_id: str, env_id: str) -> dict:
     """移出资源池：删除类危险操作，仅管理员；保留历史与稳定 ID。"""
     actor = require_admin(session, actor_id, "移出环境")
+    lock_resources(session, [env_id])
     env = _get_env(session, env_id)
     _assert_editable(session, env)
     env.lifecycle = "retired"
@@ -178,6 +184,7 @@ def archive_environment(session: Session, actor_id: str, env_id: str) -> dict:
 def restore_environment(session: Session, actor_id: str, env_id: str) -> dict:
     """恢复入池（P0）：重新校验设备引用有效性、一致性与占用，全部满足才恢复。"""
     actor = require_admin(session, actor_id, "恢复入池")
+    lock_resources(session, [env_id])
     env = session.get(Environment, env_id)
     if not env:
         raise BusinessError("环境不存在。")
@@ -228,6 +235,7 @@ def copy_environment(session: Session, actor_id: str, env_id: str, device_ids: l
 def health_check(session: Session, actor_id: str, env_id: str, healthy: bool, note: str = "") -> dict:
     """手动健康检查（P1）：仅空闲环境；异常转隔离并建立维护记录。"""
     actor = get_user(session, actor_id)
+    lock_resources(session, [env_id])
     env = _get_env(session, env_id)
     occupancy = device_occupancy(session, WORKSPACE_ID)
     device_ids = env_device_ids(session, WORKSPACE_ID, env.id)
@@ -269,7 +277,7 @@ def environment_dict(session: Session, env: Environment, occupancy: dict[str, st
             status = candidate
             break
     checked = [d.health_checked_at for d in devices if d and d.health_checked_at]
-    health = fmt_health(max(checked)) if checked else "待检查"
+    health = fmt_health(max(checked)) if checked and all(d and d.health_state == "healthy" and d.health_checked_at for d in devices) else "待检查"
     if any(d and d.health_state == "unhealthy" for d in devices):
         health = "待复核"
     return {

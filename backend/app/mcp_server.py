@@ -23,6 +23,7 @@ from .services import insights, leases as lease_service
 from .services import maintenance as maintenance_service
 from .services import runs as run_service
 from .services import snapshot as snapshot_service
+from .services.topology import save_topology as save_topology_service
 from .state import device_occupancy
 
 mcp: MCPServer = MCPServer("argus", instructions=(
@@ -107,6 +108,14 @@ def save_environment(name: str, arch: str, type: str, deviceIds: list[str],
                                    "version": version, "location": location, "owner": owner,
                                    "tags": tags or []}
         return env_service.save_environment(session, actor.id, payload)
+    return _run(handler)
+
+
+@mcp.tool(description="原子调整多个环境的设备拓扑；changes 含 envId、expectedDeviceIds 原关联和 deviceIds 目标关联。占用或快照冲突时整批拒绝。")
+def save_environment_topology(changes: list[dict[str, Any]], ctx: Context = None) -> dict:
+    def handler(session: Session) -> dict:
+        actor = _actor(session, ctx)
+        return save_topology_service(session, actor.id, {"changes": changes})
     return _run(handler)
 
 

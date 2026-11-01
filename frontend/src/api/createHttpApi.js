@@ -119,6 +119,7 @@ export function createHttpApi({
       const requestedEnvIds = envIds === undefined ? (envId ? [envId] : []) : envIds
       return mutate('/api/leases/batch', { body: { envIds: requestedEnvIds, hours, purpose }, requestKey: newRequestKey() })
     },
+    saveTopology: payload => mutate('/api/topology', { body: payload }),
     saveEnvironment: payload => mutate('/api/environments', { body: payload }),
     saveDevice: payload => mutate('/api/devices', { body: payload }),
     archiveEnvironment: id => mutate(`/api/environments/${encodeURIComponent(id)}/retire`),
