@@ -1,5 +1,6 @@
 import { createSeed, DEFAULT_USER_ID, DATA_KEY, environmentIdsFor, deviceIdsFor } from './seed.js'
 import { applyTopology } from '../topology.js'
+import { normalizeGraph, graphIssues } from '../pipeline.js'
 import { writeEnvironment, writeDevice, archiveEnvironment, retireDevice, borrowFailure } from './resources.js'
 
 const clone = value => JSON.parse(JSON.stringify(value))
@@ -24,6 +25,7 @@ export function createMockApi({ storage = null, latency = 240, now = () => new D
           const seeded = createSeed().pipelines
           parsed.pipelines = parsed.pipelines.map(p => ({ ...(seeded.find(s => s.id === p.id) || {}), ...p }))
         }
+        if (!Array.isArray(parsed.testCases)) parsed.testCases = createSeed().testCases
         memory = parsed
       }
     } catch { persistenceWarning = true }
@@ -87,6 +89,44 @@ export function createMockApi({ storage = null, latency = 240, now = () => new D
   const nextId = (prefix, rows) => `${prefix}-${Math.max(2000, ...rows.map(r => Number(r.id.split('-').at(-1)) || 0)) + 1}`
   return {
     async load() { await wait(latency); return { snapshot: read(), persistenceWarning } },
+    async validatePipeline(payload) {
+      await wait(latency)
+      const data = read(), actor = data.users.find(u => u.id === data.currentUserId)
+      if (!actor || actor.status !== 'active') throw new Error('身份不存在或已停用。')
+      if (!['ARM64', 'x86_64'].includes(payload.arch)) throw new Error('请选择有效的处理器架构。')
+      const graph = normalizeGraph(payload.graph, data.testCases, payload.arch)
+      const issues = graphIssues(graph, data.environments, payload.arch)
+      return { valid: !issues.length, issues, source: 'demo' }
+    },
+    savePipeline(payload) {
+      return mutate(data => {
+        const actor = data.users.find(u => u.id === data.currentUserId)
+        if (!actor || actor.status !== 'active') throw new Error('身份不存在或已停用。')
+        if (Object.keys(payload).some(k => !['id', 'name', 'description', 'arch', 'graph', 'expectedRevision'].includes(k))) throw new Error('编排包含未知参数，不允许指定 Job 或脚本。')
+        if (typeof payload.name !== 'string' || !payload.name.trim() || payload.name.trim().length > 120) throw new Error('流水线名称不能为空，且不能超过 120 字。')
+        if (typeof (payload.description ?? '') !== 'string' || (payload.description || '').trim().length > 200) throw new Error('描述不能超过 200 字。')
+        if (!['ARM64', 'x86_64'].includes(payload.arch)) throw new Error('请选择有效的处理器架构。')
+        const graph = normalizeGraph(payload.graph, data.testCases, payload.arch)
+        let pipeline = payload.id ? data.pipelines.find(p => p.id === payload.id) : null
+        if (payload.id) {
+          if (!pipeline) throw new Error('流水线不存在，请刷新后重试。')
+          if (pipeline.status !== 'draft') throw new Error('已发布配置不可修改，请创建编排副本。')
+          if (!Number.isInteger(payload.expectedRevision) || payload.expectedRevision !== (pipeline.editRevision || 0)) {
+            const error = new Error('草稿已被其他操作更新，请保留当前内容并重新打开最新草稿。')
+            error.code = 'pipeline_conflict'; throw error
+          }
+        } else {
+          pipeline = { id: nextId('PL', data.pipelines), version: 'v1', status: 'draft', job: '', editRevision: 0 }
+          data.pipelines.unshift(pipeline)
+        }
+        Object.assign(pipeline, { name: payload.name.trim(), description: (payload.description || '').trim(), arch: payload.arch, graph,
+          editRevision: (pipeline.editRevision || 0) + 1, date: now().toISOString().slice(0, 10), updatedAt: now().toISOString() })
+        const escape = value => value.replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;').replaceAll('"', '&quot;')
+        pipeline.xml = `<pipeline id="${escape(pipeline.id)}" name="${escape(pipeline.name)}" version="${pipeline.version}" schemaVersion="2"><orchestration format="dag-json">${escape(JSON.stringify({ graph, editRevision: pipeline.editRevision, updatedAt: pipeline.updatedAt }))}</orchestration></pipeline>`
+        activity(data, `${actor.name} 保存了流水线草稿 ${pipeline.name}`)
+        return { id: pipeline.id, editRevision: pipeline.editRevision, contentHash: '' }
+      })
+    },
     reset() { return mutate(data => { requireAdmin(data, '重置演示数据'); Object.assign(data, createSeed()); activity(data, '已恢复初始演示数据', 'green') }) },
     borrow({ envIds, envId, hours, purpose }) {
       return mutate(data => {

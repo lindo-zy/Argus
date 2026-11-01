@@ -18,7 +18,7 @@ from .devices import device_dict
 from .environments import environment_dict
 from .leases import lease_dict_of
 from .maintenance import maintenance_dict
-from .pipelines import pipeline_xml
+from .pipelines import CASE_CATALOG, draft_content, pipeline_xml
 from .runs import run_dict_of
 
 ISSUES_FIXTURE = [
@@ -59,6 +59,7 @@ def build_snapshot(session: Session) -> dict:
         "runs": [run_dict_of(session, r) for r in runs],
         "maintenance": [maintenance_dict(session, r) for r in records],
         "pipelines": pipeline_dicts(session),
+        "testCases": CASE_CATALOG,
         "issues": [dict(i) for i in ISSUES_FIXTURE],
         "activities": [{"time": e.occurred_at.astimezone().strftime("%H:%M"),
                         "text": (e.payload or {}).get("text", f"{e.action} {e.entity_id}"),
@@ -78,7 +79,9 @@ def pipeline_dicts(session: Session) -> list[dict]:
     latest: dict[str, PipelineVersion] = {}
     for v in versions:
         current = latest.get(v.definition_id)
-        if current is None or v.version > current.version:
+        def key(label):
+            return int(label.removeprefix('v')) if label.removeprefix('v').isdigit() else 0
+        if current is None or key(v.version) > key(current.version):
             latest[v.definition_id] = v
     result = []
     for d in definitions:
@@ -87,7 +90,8 @@ def pipeline_dicts(session: Session) -> list[dict]:
         # 已发布版本内容不可变；旧 seed 只写入占位 stub，展示层回退到契约形配置，
         # 不因此改写库中的版本内容。
         xml = (v.xml or "").strip() if v else ""
-        if "<jenkins " not in xml:
+        content = draft_content(v) if v else {'graph': None, 'editRevision': 0, 'updatedAt': ''}
+        if content['graph'] is None and "<jenkins " not in xml:
             xml = pipeline_xml(d.id, d.name, version_label.removeprefix("v"),
                                d.job_ref, d.architecture)
         result.append({
@@ -98,5 +102,7 @@ def pipeline_dicts(session: Session) -> list[dict]:
             "description": d.description,
             "xml": xml,
             "pipelineVersionId": v.id if v else None,
+            "graph": content['graph'], "editRevision": content['editRevision'],
+            "updatedAt": content['updatedAt'], "contentHash": v.content_hash if v else '',
         })
     return result

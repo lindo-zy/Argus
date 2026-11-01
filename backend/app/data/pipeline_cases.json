@@ -1,0 +1,132 @@
+[
+  {
+    "id": "PERF-001",
+    "name": "CPU 基准测试",
+    "category": "性能测试",
+    "module": "CPU",
+    "version": "v1",
+    "scriptVersion": "demo-v1",
+    "source": "demo",
+    "arches": [
+      "ARM64",
+      "x86_64"
+    ]
+  },
+  {
+    "id": "PERF-002",
+    "name": "内存带宽测试",
+    "category": "性能测试",
+    "module": "内存",
+    "version": "v1",
+    "scriptVersion": "demo-v1",
+    "source": "demo",
+    "arches": [
+      "ARM64",
+      "x86_64"
+    ]
+  },
+  {
+    "id": "PERF-003",
+    "name": "磁盘顺序读写",
+    "category": "性能测试",
+    "module": "存储",
+    "version": "v1",
+    "scriptVersion": "demo-v1",
+    "source": "demo",
+    "arches": [
+      "ARM64",
+      "x86_64"
+    ]
+  },
+  {
+    "id": "PERF-004",
+    "name": "网络吞吐测试",
+    "category": "性能测试",
+    "module": "网络",
+    "version": "v1",
+    "scriptVersion": "demo-v1",
+    "source": "demo",
+    "arches": [
+      "ARM64",
+      "x86_64"
+    ]
+  },
+  {
+    "id": "OSS-001",
+    "name": "OpenSSL 加密验证",
+    "category": "开源组件",
+    "module": "OpenSSL",
+    "version": "v1",
+    "scriptVersion": "demo-v1",
+    "source": "demo",
+    "arches": [
+      "ARM64",
+      "x86_64"
+    ]
+  },
+  {
+    "id": "OSS-002",
+    "name": "curl 网络请求",
+    "category": "开源组件",
+    "module": "curl",
+    "version": "v1",
+    "scriptVersion": "demo-v1",
+    "source": "demo",
+    "arches": [
+      "ARM64",
+      "x86_64"
+    ]
+  },
+  {
+    "id": "OSS-003",
+    "name": "zlib 压缩解压",
+    "category": "开源组件",
+    "module": "zlib",
+    "version": "v1",
+    "scriptVersion": "demo-v1",
+    "source": "demo",
+    "arches": [
+      "ARM64",
+      "x86_64"
+    ]
+  },
+  {
+    "id": "OSS-004",
+    "name": "SQLite 基础读写",
+    "category": "开源组件",
+    "module": "SQLite",
+    "version": "v1",
+    "scriptVersion": "demo-v1",
+    "source": "demo",
+    "arches": [
+      "ARM64",
+      "x86_64"
+    ]
+  },
+  {
+    "id": "SMOKE-001",
+    "name": "系统启动检查",
+    "category": "系统冒烟",
+    "module": "启动",
+    "version": "v1",
+    "scriptVersion": "demo-v1",
+    "source": "demo",
+    "arches": [
+      "ARM64",
+      "x86_64"
+    ]
+  },
+  {
+    "id": "SMOKE-002",
+    "name": "核心服务检查",
+    "category": "系统冒烟",
+    "module": "服务",
+    "version": "v1",
+    "scriptVersion": "demo-v1",
+    "source": "demo",
+    "arches": [
+      "ARM64",
+      "x86_64"
+    ]
+  }
+]
