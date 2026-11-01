@@ -88,6 +88,27 @@ test('pipeline rejects drafts and mismatched architectures; cleanup failure isol
   assert.ok(result.snapshot.maintenance.find(m => m.envId === 'ENV-VM-03'))
 })
 
+test('pipeline configs expose read-only contract XML and legacy snapshots are migrated in place', async () => {
+  const { snapshot } = await setup().load()
+  assert.ok(snapshot.pipelines.some(p => p.status === 'published') && snapshot.pipelines.some(p => p.status === 'draft'))
+  for (const pipeline of snapshot.pipelines) {
+    assert.match(pipeline.xml, new RegExp(`^<pipeline id="${pipeline.id}" name="${pipeline.name}" version="\\d+">`))
+    assert.match(pipeline.xml, new RegExp(`<jenkins connection="jenkins-main" job="${pipeline.job}" />`))
+    assert.match(pipeline.xml, new RegExp(`<item name="architecture" value="${pipeline.arch}" />`))
+    assert.match(pipeline.xml, /<occupancy mode="exclusive" \/>/)
+  }
+  // 旧版本本地数据缺 xml 字段：按 seed 补齐，用户借用等其余数据保持不变。
+  const local = storage()
+  const first = createMockApi({ storage: local, latency: 0 })
+  await first.borrow({ envId: 'ENV-ARM-01', hours: 4, purpose: '迁移前置数据' })
+  const stored = JSON.parse(local.getItem(DATA_KEY))
+  stored.pipelines = stored.pipelines.map(({ xml, ...pipeline }) => pipeline)
+  local.setItem(DATA_KEY, JSON.stringify(stored))
+  const migrated = await createMockApi({ storage: local, latency: 0 }).load()
+  assert.ok(migrated.snapshot.pipelines.every(p => p.xml?.includes('<jenkins')))
+  assert.ok(migrated.snapshot.leases.some(l => l.purpose === '迁移前置数据'))
+})
+
 test('invalid inputs do not mutate the snapshot and snapshots persist across service instances', async () => {
   const local = storage()
   const api = createMockApi({ storage: local, latency: 0 })

@@ -176,6 +176,19 @@ class TestEnvironmentEndpoints:
 
 
 class TestMaintenanceAndRuns:
+    def test_snapshot_pipelines_expose_contract_xml(self, client):
+        pipelines = {p["id"]: p for p in client.get("/api/snapshot").json()["pipelines"]}
+        assert set(pipelines) == {"os-smoke-test", "arm-compatibility", "storage-chaos"}
+        smoke = pipelines["os-smoke-test"]
+        assert smoke["status"] == "published"
+        assert smoke["pipelineVersionId"] == "os-smoke-test@v3"
+        assert smoke["xml"].startswith('<pipeline id="os-smoke-test" name="操作系统核心冒烟" version="3">')
+        assert '<jenkins connection="jenkins-main" job="os-smoke-test" />' in smoke["xml"]
+        assert '<item name="architecture" value="x86_64" />' in smoke["xml"]
+        assert '<occupancy mode="exclusive" />' in smoke["xml"]
+        assert pipelines["storage-chaos"]["status"] == "draft"
+        assert 'value="ARM64"' in pipelines["storage-chaos"]["xml"]
+
     def test_maintenance_start_and_verify(self, client):
         started = client.post("/api/maintenance", json={
             "envId": "ENV-ARM-01", "reason": "REST 维护"}, headers=ADMIN)

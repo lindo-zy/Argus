@@ -80,11 +80,29 @@ export function createSeed() {
     { id: 'MT-002', envId: environments[16].id, reason: '网络接口固件升级', status: 'maintenance', user: '张明', date: '2026-10-30 09:30', issue: 'RDC-2080' },
     { id: 'MT-001', envId: environments[8].id, reason: '设备失联，等待人工健康复核', status: 'isolated', user: '系统', date: '2026-10-29 16:20', issue: 'RDC-2072' },
   ]
+  // Argus 声明式配置只读示例（契约见 docs/03-接口与数据契约.md）；输出与后端 services/pipelines.py 保持一致。
+  const pipelineXml = ({ id, name, version, job, arch }) => `<pipeline id="${id}" name="${name}" version="${version.replace(/^v/, '')}">
+  <jenkins connection="jenkins-main" job="${job}" />
+  <environment>
+    <requirements>
+      <item name="architecture" value="${arch}" />
+    </requirements>
+    <occupancy mode="exclusive" />
+  </environment>
+  <parameters>
+    <parameter name="IMAGE_REF" type="string" required="true" />
+    <parameter name="TEST_SUITE" type="enum" required="true" default="smoke">
+      <option value="smoke" />
+      <option value="network" />
+    </parameter>
+  </parameters>
+  <execution timeoutMinutes="120" />
+</pipeline>`
   const pipelines = [
     { id: 'os-smoke-test', name: '操作系统核心冒烟', version: 'v3', status: 'published', job: 'os-smoke-test', arch: 'x86_64', date: '2026-10-29', description: '安装、启动、网络及核心系统服务验证' },
     { id: 'arm-compatibility', name: 'ARM64 兼容性回归', version: 'v2', status: 'published', job: 'arm-compatibility', arch: 'ARM64', date: '2026-10-28', description: 'ARM64 平台硬件与系统兼容性验证' },
     { id: 'storage-chaos', name: '存储故障注入', version: 'v1', status: 'draft', job: 'storage-chaos', arch: 'ARM64', date: '2026-10-30', description: '受控故障场景与恢复能力验证' },
-  ]
+  ].map(pipeline => ({ ...pipeline, xml: pipelineXml(pipeline) }))
   const issues = [
     { id: 'RDC-2086', title: '存储节点 I/O 超时', severity: 'P1', module: '存储', owner: '李四', status: 'pending' },
     { id: 'RDC-2080', title: '网卡固件升级后链路抖动', severity: 'P2', module: '网络', owner: '张明', status: 'pending' },

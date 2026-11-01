@@ -19,6 +19,11 @@ export function createMockApi({ storage = null, latency = 240, now = () => new D
         if (parsed.schema === 1) { parsed.schema = 2; parsed.users = createSeed().users; parsed.currentUserId = DEFAULT_USER_ID }
         const collections = ['users', 'devices', 'environments', 'leases', 'runs', 'maintenance', 'pipelines', 'issues', 'activities']
         if (parsed.schema !== 2 || !collections.every(key => Array.isArray(parsed[key]))) throw new Error('Invalid snapshot')
+        // 旧快照的流水线缺只读 XML 字段：按 seed 按需补齐，不重置用户其余演示数据。
+        if (parsed.pipelines.some(p => !p.xml)) {
+          const seeded = createSeed().pipelines
+          parsed.pipelines = parsed.pipelines.map(p => ({ ...(seeded.find(s => s.id === p.id) || {}), ...p }))
+        }
         memory = parsed
       }
     } catch { persistenceWarning = true }

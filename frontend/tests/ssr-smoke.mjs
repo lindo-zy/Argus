@@ -35,9 +35,16 @@ try {
   const retired = snapshot.environments.filter(e => e.lifecycle === 'retired')
   const envApp = createSSRApp(EnvironmentsView, { envs, snapshot: poolSnapshot, retired, canAdmin: true, cols: { arch: true, type: true, owner: true, version: true, location: true, tags: true, devices: true, status: true } })
   const envHtml = await renderToString(envApp)
-  console.log('EnvironmentsView 渲染成功，长度', envHtml.length)
-  for (const [label, needle] of [['环境卡片', 'ARM64 兼容性环境'], ['结构分布', '资源结构分布'], ['分页', '每页 12 个']]) {
+  console.log('EnvironmentsView(默认列表) 渲染成功，长度', envHtml.length)
+  for (const [label, needle] of [['列表渲染', 'ARM64 兼容性环境'], ['结构分布', '资源结构分布'], ['分页', '每页 6 个'], ['宿主机列', '宿主机 host-']]) {
     console.log(' ', label, envHtml.includes(needle) ? 'OK' : '缺失!')
+  }
+  // 切到卡片视图再渲染一次，验证环境卡片与宿主机行
+  globalThis.localStorage = { getItem: key => (key === 'argus.envView' ? 'grid' : null), setItem() {}, removeItem() {}, clear() {} }
+  const gridApp = createSSRApp(EnvironmentsView, { envs, snapshot: poolSnapshot, retired, canAdmin: true, cols: { arch: true, type: true, owner: true, version: true, location: true, tags: true, devices: true, status: true } })
+  const gridHtml = await renderToString(gridApp)
+  for (const [label, needle] of [['环境卡片', 'IP：'], ['卡片宿主机', '宿主机：']]) {
+    console.log(' ', label, gridHtml.includes(needle) ? 'OK' : '缺失!')
   }
   const wsApp = createSSRApp(WorkspaceView, { page: 'people', envs, snapshot: poolSnapshot, currentUser: snapshot.users[0], canAdmin: true })
   const wsHtml = await renderToString(wsApp)

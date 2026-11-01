@@ -15,6 +15,7 @@ from .models import (
     MaintenanceRecord, PipelineDefinition, PipelineRun, PipelineVersion, ResourceEvent, User,
 )
 from .services import WORKSPACE_ID, ensure_workspace
+from .services.pipelines import pipeline_xml
 
 TZ = timezone(timedelta(hours=8))
 BASELINE = datetime(2026, 10, 30, 14, 28, tzinfo=TZ)
@@ -171,7 +172,7 @@ def seed(session: Session) -> int:
                                        job_ref=job, architecture=arch))
         session.add(PipelineVersion(
             id=f"{pid}@{version}", workspace_id=WORKSPACE_ID, definition_id=pid, version=version,
-            xml=f"<pipeline id=\"{pid}\" version=\"{version}\" />", status=status,
+            xml=pipeline_xml(pid, name, version.removeprefix("v"), job, arch), status=status,
             published_by="U-1001" if status == "published" else "",
             published_at=datetime.fromisoformat(f"{date}T10:00:00+08:00") if status == "published" else None))
     session.flush()

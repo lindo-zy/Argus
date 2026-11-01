@@ -18,6 +18,7 @@ from .devices import device_dict
 from .environments import environment_dict
 from .leases import lease_dict_of
 from .maintenance import maintenance_dict
+from .pipelines import pipeline_xml
 from .runs import run_dict_of
 
 ISSUES_FIXTURE = [
@@ -71,7 +72,8 @@ def pipeline_dicts(session: Session) -> list[dict]:
     if not definitions:
         # 空库（未 seed）时返回固定演示样本，保持界面可用。
         return [{"id": pid, "name": name, "version": ver, "status": status, "job": job,
-                 "arch": arch, "date": date, "description": desc}
+                 "arch": arch, "date": date, "description": desc,
+                 "xml": pipeline_xml(pid, name, ver.removeprefix("v"), job, arch)}
                 for pid, name, ver, status, job, arch, date, desc in PIPELINE_FIXTURE]
     latest: dict[str, PipelineVersion] = {}
     for v in versions:
@@ -81,12 +83,20 @@ def pipeline_dicts(session: Session) -> list[dict]:
     result = []
     for d in definitions:
         v = latest.get(d.id)
+        version_label = v.version if v else "v1"
+        # 已发布版本内容不可变；旧 seed 只写入占位 stub，展示层回退到契约形配置，
+        # 不因此改写库中的版本内容。
+        xml = (v.xml or "").strip() if v else ""
+        if "<jenkins " not in xml:
+            xml = pipeline_xml(d.id, d.name, version_label.removeprefix("v"),
+                               d.job_ref, d.architecture)
         result.append({
-            "id": d.id, "name": d.name, "version": v.version if v else "v1",
+            "id": d.id, "name": d.name, "version": version_label,
             "status": v.status if v else "draft", "job": d.job_ref, "arch": d.architecture,
             "date": (v.published_at or v.__dict__.get("created_at")).date().isoformat()
                     if v and (v.published_at or getattr(v, "created_at", None)) else "",
             "description": d.description,
+            "xml": xml,
             "pipelineVersionId": v.id if v else None,
         })
     return result
