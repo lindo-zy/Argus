@@ -1,6 +1,8 @@
 <script setup>
 defineProps({ name: { type: String, default: 'grid' }, size: { type: [Number, String], default: 20 } })
 const paths = {
+  edit: 'm14 4 6 6 M3 21l5-1L21 7l-5-5L3 15z',
+  move: 'M12 2v20 M2 12h20 M8 6l4-4 4 4 M8 18l4 4 4-4 M6 8l-4 4 4 4 M18 8l4 4-4 4',
   grid: 'M3 3h7v7H3z M14 3h7v7h-7z M3 14h7v7H3z M14 14h7v7h-7z',
   home: 'm3 10 9-7 9 7v10a1 1 0 0 1-1 1h-5v-7H9v7H4a1 1 0 0 1-1-1z',
   server: 'M4 3h16v7H4z M4 14h16v7H4z M7 6.5h.01 M7 17.5h.01 M11 6.5h6 M11 17.5h6',

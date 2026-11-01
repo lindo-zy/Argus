@@ -59,8 +59,9 @@ export function writeDevice(data, payload, timestamp) {
   const location = text(payload.location, '设备位置', 100)
   const ip = text(payload.ip, '设备地址', 100)
   platform(payload.arch, payload.type)
+  const host = payload.type === 'virtual' ? text(payload.host, '宿主机', 100) : ''
   if (previous && data.environments.some(e => active(e) && e.deviceIds.includes(previous.id) && (e.arch !== payload.arch || e.type !== payload.type))) throw new Error('设备仍被环境引用，请先调整关联后再修改架构或类型。')
-  const device = { ...previous, id: previous?.id || nextId('DEV', data.devices), name, cpu, memory, location, ip,
+  const device = { ...previous, id: previous?.id || nextId('DEV', data.devices), name, cpu, memory, location, ip, host,
     arch: payload.arch, type: payload.type, status: previous?.status || 'available', lifecycle: 'active',
     createdBy: previous?.createdBy || CURRENT_USER, updatedAt: timestamp, createdAt: previous?.createdAt || timestamp,
   }
