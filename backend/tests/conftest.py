@@ -11,7 +11,11 @@ from __future__ import annotations
 
 import os
 
-TEST_DATABASE_URL = "postgresql+psycopg://argus:argus@127.0.0.1:5433/argus_test"
+TEST_DATABASE_URL = os.environ.get("ARGUS_TEST_DATABASE_URL", "postgresql+psycopg://argus:argus@127.0.0.1:5433/argus_test")
+# The suite truncates all tables. Reject non-test database names even on overrides.
+from sqlalchemy.engine import make_url
+if not (make_url(TEST_DATABASE_URL).database or "").endswith("_test"):
+    raise RuntimeError("ARGUS_TEST_DATABASE_URL 必须指向独立的 *_test 数据库。")
 os.environ["ARGUS_DATABASE_URL"] = TEST_DATABASE_URL
 
 import pytest

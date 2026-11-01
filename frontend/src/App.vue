@@ -10,6 +10,7 @@ import DashboardView from './views/DashboardView.vue'
 import PipelinesView from './views/PipelinesView.vue'
 import WorkspaceView from './views/WorkspaceView.vue'
 import TopologyView from './views/TopologyView.vue'
+import PipelineEditor from './components/PipelineEditor.vue'
 import './topology.css'
 import { useTheme } from './composables/useTheme.js'
 import { createMockApi } from './mock/api.js'
@@ -30,6 +31,8 @@ try { storage = window.localStorage } catch { storage = null }
 const mockApi = createMockApi({ storage })
 let api = createHttpApi({ base: (typeof import.meta !== 'undefined' && import.meta.env?.VITE_API_BASE) || 'http://127.0.0.1:8000' })
 const topologyView = ref(null), dataMode = ref('http')
+// DAG 编排器是独立全页工作区：未保存离开走 canLeave 确认，保存后刷新全局快照。
+const pipelineEditor = ref(null), pipelineEditorView = ref(null)
 const snapshot = ref(createSeed()), loading = ref(true), loadError = ref(''), busy = ref(false), modalError = ref('')
 const envs = computed(() => enrichEnvironments(snapshot.value))
 const poolSnapshot = computed(() => ({ ...snapshot.value, devices: snapshot.value.devices.filter(d => d.lifecycle !== 'retired') }))
@@ -75,6 +78,7 @@ const envName = id => snapshot.value.environments.find(e => e.id === id)?.name |
 const scopeName = record => environmentIdsFor(record).map(envName).join('、')
 function notify(message, tone = 'green') { clearTimeout(toastTimer); toast.value = { message, tone }; toastTimer = setTimeout(() => { toast.value = null }, 4500) }
 async function load() {
+  if (editorBlocked()) return
   if (topologyView.value && !topologyView.value.canLeave()) return
   loading.value = true; loadError.value = ''
   try { const result = await api.load(); snapshot.value = result.snapshot; if (result.persistenceWarning) notify('本地存储不可用或数据已损坏，当前使用内存演示数据。', 'amber') }
@@ -93,6 +97,15 @@ async function saveTopology(payload) {
   snapshot.value = result.snapshot
   return result
 }
+async function savePipeline(payload) {
+  const result = await api.savePipeline(payload)
+  snapshot.value = result.snapshot
+  return result
+}
+function validatePipeline(payload) { return api.validatePipeline(payload) }
+function editPipeline(payload) { modal.value = null; pipelineEditor.value = payload; window.scrollTo({ top: 0 }) }
+function closePipelineEditor() { pipelineEditor.value = null }
+function editorBlocked() { return !!pipelineEditor.value && !pipelineEditorView.value?.canLeave() }
 async function callApi(name, ...args) {
   if (typeof api[name] !== 'function') throw new Error('该功能需要连接后端服务（当前为浏览器 Mock 模式）。')
   return api[name](...args)
@@ -104,8 +117,8 @@ async function action(operation, message, close = true) {
   catch (error) { modalError.value = error.message || '操作未完成，请重试。' }
   finally { busy.value = false }
 }
-function navigate(id) { if (page.value === 'topology' && id !== 'topology' && topologyView.value && !topologyView.value.canLeave()) return; page.value = id; location.hash = `/${id}`; mobileOpen.value = false; searchOpen.value = false; modal.value = null }
-function routeChange() { if (page.value === 'topology' && getPage() !== 'topology' && topologyView.value && !topologyView.value.canLeave()) { location.hash = '/topology'; return } page.value = getPage(); mobileOpen.value = false; presentation.value = false; window.scrollTo({ top: 0 }) }
+function navigate(id) { if (editorBlocked()) return; if (page.value === 'topology' && id !== 'topology' && topologyView.value && !topologyView.value.canLeave()) return; page.value = id; location.hash = `/${id}`; mobileOpen.value = false; searchOpen.value = false; modal.value = null }
+function routeChange() { if (editorBlocked()) { location.hash = `/${page.value}`; return } if (page.value === 'topology' && getPage() !== 'topology' && topologyView.value && !topologyView.value.canLeave()) { location.hash = '/topology'; return } page.value = getPage(); mobileOpen.value = false; presentation.value = false; window.scrollTo({ top: 0 }) }
 function focusMain() { document.getElementById('main-content')?.focus() }
 watch(page, () => { document.title = `${currentTitle.value} · Argus` }, { immediate: true })
 // 人员管理仅管理员可见：普通人员直接输入 #/people 时重定向回环境资源。
@@ -317,7 +330,8 @@ onBeforeUnmount(() => { clearTimeout(toastTimer); window.removeEventListener('ha
     <main id="main-content" class="page-content" tabindex="-1"><div v-if="loading" class="loading-state" role="status"><span class="spinner" /><h2>正在准备工作空间</h2><p>加载环境与执行数据…</p></div><div v-else-if="loadError" class="empty-state panel" role="alert"><Icon name="alert" :size="36" /><h2>暂时无法加载数据</h2><p>{{ loadError }}</p><button class="button primary" @click="load">重新加载</button></div><template v-else>
       <div v-show="page === 'environments'"><EnvironmentsView :envs="envs" :snapshot="poolSnapshot" :retired="retiredEnvs" :can-admin="isAdmin" :cols="listCols" @details="details" @borrow="borrow" @run="runDetails" @lease="leaseDetails" @navigate="navigate" @maintenance="maintenance" @create="editResource('environment')" @restore="confirmRestore" @timeline="openTimeline" @export="exportEnvironments" @events="openEvents" @col-toggle="toggleCol" @batch-operate="p => runBatch(p.kind, p.ids)" /></div>
       <div v-show="page === 'dashboard'"><DashboardView :envs="envs" :snapshot="poolSnapshot" :presentation="presentation" @navigate="navigate" @run="runDetails" @info="open('info')" @presentation="togglePresentation" /></div>
-      <div v-show="page === 'pipelines'"><PipelinesView :snapshot="poolSnapshot" :envs="envs" @pipeline="pipeline" /></div>
+      <div v-show="page === 'pipelines' && !pipelineEditor"><PipelinesView :snapshot="poolSnapshot" :envs="envs" @pipeline="pipeline" @edit="editPipeline" /></div>
+      <PipelineEditor v-if="page === 'pipelines' && pipelineEditor" ref="pipelineEditorView" :snapshot="poolSnapshot" :envs="envs" :pipeline="pipelineEditor.pipeline" :example="pipelineEditor.example" :mode="dataMode" :save="savePipeline" :validate="validatePipeline" @close="closePipelineEditor" />
       <TopologyView v-if="page === 'topology'" ref="topologyView" :snapshot="poolSnapshot" :mode="dataMode" :save="saveTopology" :refresh="refreshTopology" @environment="details" @device="device => editResource('device', device)" />
       <WorkspaceView v-if="!['environments', 'dashboard', 'pipelines', 'topology'].includes(page)" :page="page" :envs="envs" :snapshot="poolSnapshot" :current-user="currentUser" :can-admin="isAdmin" @details="details" @run="runDetails" @lease="leaseDetails" @borrow="borrow" @maintenance="maintenance" @issue="issue => open('issue', issue.id)" @device-create="editResource('device')" @device-edit="device => editResource('device', device)" @device-remove="device => confirmArchive('device', device)" @user-add="open('userAdd')" @user-role="(user, role) => action(() => api.setUserRole(user.id, role), `已将 ${user.name} 设为${roleLabel({ role })}。`)" @user-status="(user, status) => action(() => api.setUserStatus(user.id, status), `已${status === 'disabled' ? '停用' : '启用'} ${user.name}。`)" @user-switch="switchUser" />
       <footer class="app-footer"><span><i class="dot teal" />ARGUS · 本地演示工作空间</span><span>演示数据 · 未接入真实设备与外部系统</span><button class="text-button" @click="load"><Icon name="refresh" :size="13" />刷新数据</button></footer>

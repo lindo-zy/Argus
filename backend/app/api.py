@@ -25,6 +25,7 @@ from .services import environments as env_service
 from .services import insights, leases as lease_service
 from .services import maintenance as maintenance_service
 from .services import runs as run_service
+from .services import pipelines as pipeline_service
 from .services import snapshot as snapshot_service
 from .services import users as user_service
 from .services.topology import save_topology as save_topology_service
@@ -40,6 +41,18 @@ def actor_id_header(x_argus_user: str = Header(default="")) -> str:
 def commit_and_respond(session: Session, result: Any) -> dict:
     session.commit()
     return {"result": result, "snapshot": snapshot_service.build_snapshot(session)}
+
+
+@router.post('/pipelines/drafts')
+def save_pipeline_draft(payload: dict, session: Session = Depends(get_session),
+                        actor: str = Depends(actor_id_header)) -> dict:
+    return commit_and_respond(session, pipeline_service.save_pipeline(session, actor, payload))
+
+
+@router.post('/pipelines/validate')
+def validate_pipeline_draft(payload: dict, session: Session = Depends(get_session),
+                            actor: str = Depends(actor_id_header)) -> dict:
+    return pipeline_service.validate_pipeline(session, actor, payload)
 
 
 @router.get("/snapshot")

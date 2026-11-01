@@ -1,3 +1,5 @@
+import pipelineCases from './pipeline-cases.json' with { type: 'json' }
+
 export const CURRENT_USER = '王磊'
 export const DATA_KEY = 'argus.mock.v1'
 export const statusMeta = {
@@ -109,7 +111,7 @@ export function createSeed() {
     { id: 'RDC-2072', title: '安全验证节点偶发失联', severity: 'P2', module: '基础设施', owner: '王磊', status: 'pending' },
     { id: 'RDC-2065', title: '虚拟机 DNS 解析超时', severity: 'P2', module: '网络', owner: '李四', status: 'success' },
   ]
-  return { schema: 2, revision: 0, users, currentUserId: DEFAULT_USER_ID, devices, environments, leases, runs, maintenance, pipelines, issues,
+  return { schema: 2, revision: 0, users, currentUserId: DEFAULT_USER_ID, devices, environments, leases, runs, maintenance, pipelines, issues, testCases: pipelineCases,
     activities: [
       { time: '14:26', text: '张明 启动了 RUN-1028 稳定性回归任务', tone: 'blue' },
       { time: '13:50', text: '王磊 借用了 ARM64 性能基准环境', tone: 'green' },

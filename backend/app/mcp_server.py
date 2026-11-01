@@ -22,6 +22,7 @@ from .services import devices as device_service
 from .services import insights, leases as lease_service
 from .services import maintenance as maintenance_service
 from .services import runs as run_service
+from .services import pipelines as pipeline_service
 from .services import snapshot as snapshot_service
 from .services.topology import save_topology as save_topology_service
 from .state import device_occupancy
@@ -30,6 +31,24 @@ mcp: MCPServer = MCPServer("argus", instructions=(
     "Argus 操作系统测试平台。工具覆盖环境/设备/借用/维护/执行的查询与操作；"
     "所有变更即时生效并写入审计事件。删除类操作（移出/恢复/重置）与人员管理仅管理员 token 可执行。"
 ))
+
+
+@mcp.tool(description='查询演示用例目录：稳定 ID、版本、分类与架构；尚未接入真实用例中心。')
+def list_pipeline_cases(ctx: Context = None) -> list[dict]:
+    def handler(session):
+        _actor(session, ctx)
+        return pipeline_service.CASE_CATALOG
+    return _run(handler)
+
+
+@mcp.tool(description='保存标准流水线 DAG 草稿；仅环境安装和用例执行节点。更新需 expectedRevision；已发布配置不可修改。不会占用设备或执行任务。')
+def save_pipeline_draft(payload: dict, ctx: Context = None) -> dict:
+    return _run(lambda session: pipeline_service.save_pipeline(session, _actor(session, ctx).id, payload))
+
+
+@mcp.tool(description='校验 DAG 结构、环境继承与已选用例版本；不会执行任务或占用设备。')
+def validate_pipeline_draft(payload: dict, ctx: Context = None) -> dict:
+    return _run(lambda session: pipeline_service.validate_pipeline(session, _actor(session, ctx).id, payload))
 
 
 def _session() -> Session:

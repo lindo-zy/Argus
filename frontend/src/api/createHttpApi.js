@@ -120,6 +120,8 @@ export function createHttpApi({
       return mutate('/api/leases/batch', { body: { envIds: requestedEnvIds, hours, purpose }, requestKey: newRequestKey() })
     },
     saveTopology: payload => mutate('/api/topology', { body: payload }),
+    savePipeline: payload => mutate('/api/pipelines/drafts', { body: payload }),
+    validatePipeline: payload => request('/api/pipelines/validate', { method: 'POST', body: payload }),
     saveEnvironment: payload => mutate('/api/environments', { body: payload }),
     saveDevice: payload => mutate('/api/devices', { body: payload }),
     archiveEnvironment: id => mutate(`/api/environments/${encodeURIComponent(id)}/retire`),
