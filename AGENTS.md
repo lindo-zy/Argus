@@ -97,7 +97,7 @@ npm test
 npm run build
 
 # 仓库根目录：需要本地数据库时
-docker-compose up -d db
+docker compose -f deploy/docker-compose.yml up -d db
 
 # backend/：仅对确认的本地开发数据库执行迁移
 .venv/bin/alembic upgrade head

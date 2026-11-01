@@ -19,3 +19,6 @@ __pycache__/
 /docs/
 /assets/
 /references/
+
+# 部署本地配置（服务器地址等，不入库）
+deploy/deploy.env

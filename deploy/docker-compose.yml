@@ -1,3 +1,7 @@
+# Argus 部署编排：db + backend + frontend（nginx 同源反代）。
+# 项目名固定为 argus：无论 compose 文件在哪个目录执行，容器名与数据卷 argus_pgdata 都保持一致。
+name: argus
+
 services:
   db:
     image: postgres:17-alpine
@@ -19,7 +23,9 @@ services:
       retries: 10
 
   backend:
-    build: ./backend
+    build:
+      context: ../backend
+      dockerfile: ../deploy/backend.Dockerfile
     container_name: argus-backend
     environment:
       ARGUS_DATABASE_URL: postgresql+psycopg://argus:argus@db:5432/argus
@@ -29,7 +35,9 @@ services:
     restart: unless-stopped
 
   frontend:
-    build: ./frontend
+    build:
+      context: ../frontend
+      dockerfile: ../deploy/frontend.Dockerfile
     container_name: argus-frontend
     ports:
       - "80:80"
