@@ -1,4 +1,5 @@
 import { createSeed, DEFAULT_USER_ID, DATA_KEY, environmentIdsFor, deviceIdsFor } from './seed.js'
+import { applyTopology } from '../topology.js'
 import { writeEnvironment, writeDevice, archiveEnvironment, retireDevice, borrowFailure } from './resources.js'
 
 const clone = value => JSON.parse(JSON.stringify(value))
@@ -18,6 +19,11 @@ export function createMockApi({ storage = null, latency = 240, now = () => new D
         if (parsed.schema === 1) { parsed.schema = 2; parsed.users = createSeed().users; parsed.currentUserId = DEFAULT_USER_ID }
         const collections = ['users', 'devices', 'environments', 'leases', 'runs', 'maintenance', 'pipelines', 'issues', 'activities']
         if (parsed.schema !== 2 || !collections.every(key => Array.isArray(parsed[key]))) throw new Error('Invalid snapshot')
+        // 旧快照的流水线缺只读 XML 字段：按 seed 按需补齐，不重置用户其余演示数据。
+        if (parsed.pipelines.some(p => !p.xml)) {
+          const seeded = createSeed().pipelines
+          parsed.pipelines = parsed.pipelines.map(p => ({ ...(seeded.find(s => s.id === p.id) || {}), ...p }))
+        }
         memory = parsed
       }
     } catch { persistenceWarning = true }
@@ -105,6 +111,16 @@ export function createMockApi({ storage = null, latency = 240, now = () => new D
         activity(data, `${me(data).name} 借用了 ${scopeLabel(data, lease)}（${selected.length} 个环境）`, 'green')
         return { lease, requestedEnvIds, outcomes }
       }, { shouldCommit: result => !!result.lease })
+    },
+    saveTopology(payload) {
+      return mutate(data => {
+        const actor = data.users.find(u => u.id === data.currentUserId)
+        if (!actor) throw new Error('身份不存在或已失效，请刷新后重试。')
+        if (actor.status !== 'active') throw new Error('该身份已停用，不能执行操作。')
+        const result = applyTopology(data, payload, now().toISOString())
+        if (result.changed) activity(data, `${actor.name} 调整了 ${result.changed} 个环境的设备拓扑`)
+        return result
+      }, { shouldCommit: result => result.changed > 0 })
     },
     saveEnvironment(payload) {
       return mutate(data => { const env = writeEnvironment(data, payload, now().toISOString()); activity(data, `${me(data).name} ${payload.id ? '更新' : '新增'}了环境 ${env.name}`, 'green'); return env })

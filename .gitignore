@@ -4,6 +4,9 @@ dist/
 playwright-report/
 test-results/
 .pytest_cache/
+.venv/
+__pycache__/
+*.egg-info/
 
 # 本地工具/代理配置文件夹，不入库
 .zcode/

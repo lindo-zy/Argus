@@ -1,13 +1,15 @@
 <script setup>
+import { computed } from 'vue'
 import Icon from './Icon.vue'
 import StatusBadge from './StatusBadge.vue'
-defineProps({ env: Object })
+const props = defineProps({ env: Object })
 const emit = defineEmits(['details', 'borrow', 'run', 'lease', 'maintenance'])
+const extraTags = computed(() => (props.env.tags || []).filter(t => t !== props.env.arch && t !== '物理机' && t !== '虚拟机'))
 </script>
 <template>
   <article class="environment-card">
     <div class="environment-head"><div class="resource-icon"><Icon :name="env.type === 'virtual' ? 'monitor' : 'server'" :size="27" /></div><div class="environment-title"><h3><button class="plain-title" @click="emit('details', env)">{{ env.name }}</button></h3><span class="mono">{{ env.id }}</span></div><StatusBadge :status="env.status" /></div>
-    <div class="environment-body"><p class="metadata">{{ env.arch }}<span>·</span>{{ env.type === 'physical' ? '物理机' : '虚拟机' }}<span>·</span>{{ env.deviceIds.length }} 台设备</p><p><Icon name="settings" :size="15" /><span>OS 版本：{{ env.version || '未记录' }}</span><span v-if="env.shared" class="shared-label"><Icon name="link" :size="12" />共享设备</span></p>
+    <div class="environment-body"><p class="metadata">{{ env.arch }}<span>·</span>{{ env.type === 'physical' ? '物理机' : '虚拟机' }}<span>·</span>{{ env.deviceIds.length }} 台设备<span v-if="env.owner">·</span><span v-if="env.owner">{{ env.owner }}</span></p><p v-if="extraTags.length" class="env-tags"><span v-for="tag in extraTags" :key="tag" class="badge tone-muted">{{ tag }}</span></p><p><Icon name="monitor" :size="15" /><span>IP：<span class="mono">{{ env.ip || '未记录' }}</span></span></p><p v-if="env.type === 'virtual'"><Icon name="flow" :size="15" /><span>宿主机：<span class="mono">{{ env.host || '未记录' }}</span></span></p><p><Icon name="settings" :size="15" /><span>OS 版本：{{ env.version || '未记录' }}</span><span v-if="env.shared" class="shared-label"><Icon name="link" :size="12" />共享设备</span></p>
       <template v-if="env.run"><p><Icon name="play" :size="15" /><span>当前任务：<button class="inline-link mono" @click="emit('run', env.run)">{{ env.run.id }}</button></span></p><div class="progress-row"><div class="progress-track"><i :style="{ width: env.run.progress + '%' }" /></div><span class="mono">{{ env.run.progress }}%</span></div></template>
       <p v-else-if="env.lease"><Icon name="user" :size="15" /><span>{{ env.lease.user }} · {{ env.lease.purpose }}</span></p>
       <p v-else-if="env.status === 'available'"><Icon name="pulse" :size="15" /><span>最近健康检查：{{ env.health.includes(' ') ? env.health.slice(11) : env.health }}</span></p>
