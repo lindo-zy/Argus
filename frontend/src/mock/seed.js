@@ -52,7 +52,8 @@ export function createSeed() {
       deviceIds.push(deviceId)
       devices.push({
         id: deviceId, name: `${arch === 'ARM64' ? 'arm' : 'x86'}-${type === 'virtual' ? 'vm' : 'node'}-${String(devices.length + 1).padStart(2, '0')}`,
-        arch, type, status, ip: `10.24.${i + 1}.${j + 11}`, cpu: arch === 'ARM64' ? 'Kunpeng 920 · 32 核' : 'Xeon Gold · 24 核',
+        arch, type, status, ip: `10.24.${i + 1}.${j + 11}`, host: type === 'virtual' ? `host-${String(j % 4 + 1).padStart(2, '0')}` : '',
+        cpu: arch === 'ARM64' ? 'Kunpeng 920 · 32 核' : 'Xeon Gold · 24 核',
         memory: type === 'virtual' ? '32 GB' : '128 GB', location: type === 'virtual' ? '虚拟资源池 / 集群 A' : `实验室 A / 机柜 ${Math.floor(i / 4) + 1}`,
       })
     }
@@ -117,13 +118,17 @@ export function environmentStatus(env, devices) {
 }
 
 export function enrichEnvironments(snapshot) {
-  return snapshot.environments.filter(env => env.lifecycle !== 'retired').map(env => ({
-    ...env, status: environmentStatus(env, snapshot.devices),
-    devices: snapshot.devices.filter(d => env.deviceIds.includes(d.id) && d.lifecycle !== 'retired'),
-    shared: env.deviceIds.some(id => snapshot.environments.filter(e => e.lifecycle !== 'retired' && e.deviceIds.includes(id)).length > 1),
-    run: snapshot.runs.find(r => r.envId === env.id && ['running', 'cleaning', 'reconciling'].includes(r.status)),
-    lease: snapshot.leases.find(l => environmentIdsFor(l).includes(env.id) && ['active', 'checking'].includes(l.status)),
-  }))
+  return snapshot.environments.filter(env => env.lifecycle !== 'retired').map(env => {
+    const devices = snapshot.devices.filter(d => env.deviceIds.includes(d.id) && d.lifecycle !== 'retired')
+    return {
+      ...env, status: environmentStatus(env, snapshot.devices), devices,
+      ip: [...new Set(devices.map(d => d.ip).filter(Boolean))].join(', '),
+      host: [...new Set(devices.map(d => d.host).filter(Boolean))].join(', '),
+      shared: env.deviceIds.some(id => snapshot.environments.filter(e => e.lifecycle !== 'retired' && e.deviceIds.includes(id)).length > 1),
+      run: snapshot.runs.find(r => r.envId === env.id && ['running', 'cleaning', 'reconciling'].includes(r.status)),
+      lease: snapshot.leases.find(l => environmentIdsFor(l).includes(env.id) && ['active', 'checking'].includes(l.status)),
+    }
+  })
 }
 
 // Historical fixture, independent from the current resource snapshot. Units and scope remain explicit.
