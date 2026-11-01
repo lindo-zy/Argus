@@ -7,8 +7,9 @@ services:
       POSTGRES_USER: argus
       POSTGRES_PASSWORD: argus
       PGDATA: /var/lib/postgresql/data/pgdata
+    # 只绑定本机回环：宿主机本地开发连 127.0.0.1:5433，不向公网暴露 PostgreSQL。
     ports:
-      - "5433:5432"
+      - "127.0.0.1:5433:5432"
     volumes:
       - argus_pgdata:/var/lib/postgresql/data
     healthcheck:
@@ -16,6 +17,25 @@ services:
       interval: 5s
       timeout: 3s
       retries: 10
+
+  backend:
+    build: ./backend
+    container_name: argus-backend
+    environment:
+      ARGUS_DATABASE_URL: postgresql+psycopg://argus:argus@db:5432/argus
+    depends_on:
+      db:
+        condition: service_healthy
+    restart: unless-stopped
+
+  frontend:
+    build: ./frontend
+    container_name: argus-frontend
+    ports:
+      - "80:80"
+    depends_on:
+      - backend
+    restart: unless-stopped
 
 volumes:
   argus_pgdata:

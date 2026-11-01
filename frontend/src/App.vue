@@ -29,7 +29,8 @@ let storage
 try { storage = window.localStorage } catch { storage = null }
 // 优先连接真实后端；后端不可达时自动回退浏览器 Mock（离线演示模式）。
 const mockApi = createMockApi({ storage })
-let api = createHttpApi({ base: (typeof import.meta !== 'undefined' && import.meta.env?.VITE_API_BASE) || 'http://127.0.0.1:8000' })
+// VITE_API_BASE 置空表示同源部署（nginx 反代 /api）；未设置时回退本地开发后端。
+let api = createHttpApi({ base: (typeof import.meta !== 'undefined' ? import.meta.env?.VITE_API_BASE : undefined) ?? 'http://127.0.0.1:8000' })
 const topologyView = ref(null), dataMode = ref('http')
 // DAG 编排器是独立全页工作区：未保存离开走 canLeave 确认，保存后刷新全局快照。
 const pipelineEditor = ref(null), pipelineEditorView = ref(null)
