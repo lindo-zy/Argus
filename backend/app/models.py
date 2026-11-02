@@ -221,6 +221,9 @@ class PipelineDefinition(Base):
     connection_ref: Mapped[str] = mapped_column(String(64), default="jenkins-main")
     job_ref: Mapped[str] = mapped_column(String(120), default="")
     architecture: Mapped[str] = mapped_column(String(16), default="x86_64")
+    # 动态编排同步状态：'' | pending | synced | failed；job_synced_hash 为最近一次同步的配置摘要。
+    job_sync_state: Mapped[str] = mapped_column(String(16), default="")
+    job_synced_hash: Mapped[str] = mapped_column(String(64), default="")
 
 
 class PipelineVersion(Base):
@@ -269,6 +272,24 @@ class PipelineRun(Base):
     started_by: Mapped[str] = mapped_column(String(64), default="")
     started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, server_default=func.now())
     ended_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+class PipelineExecution(Base):
+    """流水线执行的外部编排意图：先持久化再提交，每次运行至多提交一次。
+
+    request_key/request_hash 支撑幂等重放；snapshot 固化 Job 名、参数与配置摘要，
+    ARGUS_TOKEN 用于 Jenkins queue/build 对账（提交结果不明时按 token 找回，不重复提交）。
+    JSON 字段整体替换、不原地修改，保证每个状态转换都被 SQLAlchemy 持久化。
+    """
+    __tablename__ = "pipeline_executions"
+    run_id: Mapped[str] = mapped_column(String(64), ForeignKey("pipeline_runs.id"), primary_key=True)
+    actor_id: Mapped[str] = mapped_column(String(64), nullable=False)
+    request_key: Mapped[str] = mapped_column(String(128), nullable=False)
+    request_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    snapshot: Mapped[dict] = mapped_column(JSONB, default=dict)
+    nodes: Mapped[list] = mapped_column(JSONB, default=list)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, server_default=func.now())
+    __table_args__ = (UniqueConstraint("actor_id", "request_key", name="uq_execution_request"),)
 
 
 class BackgroundTask(Base):

@@ -215,6 +215,49 @@ def save_pipeline(session: Session, actor_id: str, payload: dict) -> dict:
     return {'id': pid, 'editRevision': revision, 'contentHash': version.content_hash}
 
 
+def publish_pipeline(session: Session, actor_id: str, pid: str, payload: dict) -> dict:
+    """发布 = 冻结配置（治理动作，仅管理员）+ 动态编排同步 Jenkins Job（尽力而为）。"""
+    from . import require_admin
+    actor = require_admin(session, actor_id, '发布流水线')
+    definition = session.execute(select(PipelineDefinition).where(
+        PipelineDefinition.id == pid, PipelineDefinition.workspace_id == WORKSPACE_ID).with_for_update()).scalar_one_or_none()
+    if not definition:
+        raise BusinessError('流水线不存在。')
+    version = session.execute(select(PipelineVersion).where(
+        PipelineVersion.definition_id == pid).with_for_update()).scalar_one()
+    if version.status == 'published':
+        # 幂等重放：内容一致则直接返回；并把上一次未完成的同步补上。
+        if payload.get('contentHash') != version.content_hash:
+            raise BusinessError('配置已变化，请刷新后重试。', code='pipeline_conflict')
+        return _sync_after_publish(session, actor, definition, version)
+    content = draft_content(version)
+    if (set(payload) != {'expectedRevision', 'contentHash'} or not version.content_hash
+            or type(payload['expectedRevision']) is not int or payload['expectedRevision'] != content['editRevision']
+            or payload['contentHash'] != version.content_hash):
+        raise BusinessError('配置已变化，请重新打开草稿并核对后发布。', code='pipeline_conflict')
+    result = validate_pipeline(session, actor.id, {'arch': definition.architecture, 'graph': content['graph']})
+    if not result['valid']:
+        raise BusinessError('发布前请修复编排：' + '；'.join(i['message'] for i in result['issues']))
+    version.status, version.published_by, version.published_at = 'published', actor.id, now()
+    record_event(session, actor_id=actor.id, action='pipeline_publish', entity_type='pipeline', entity_id=pid,
+                 payload={'text': f'{actor.name} 发布了流水线 {definition.name}', 'contentHash': version.content_hash})
+    session.flush()
+    return _sync_after_publish(session, actor, definition, version)
+
+
+def _sync_after_publish(session: Session, actor, definition: PipelineDefinition, version: PipelineVersion) -> dict:
+    """发布成功后把编排同步为受控 Jenkins Job；Jenkins 不可达只标记，不阻塞发布。"""
+    from .jenkins import JenkinsError
+    from .provisioning import sync_pipeline_job
+    try:
+        sync_result = sync_pipeline_job(session, actor.id, definition, version)
+    except JenkinsError:
+        sync_result = {'jobRef': definition.job_ref, 'state': definition.job_sync_state or 'failed',
+                       'action': 'deferred'}
+    return {'id': definition.id, 'pipelineVersionId': version.id, 'contentHash': version.content_hash,
+            'jobSync': sync_result}
+
+
 def pipeline_xml(pid: str, name: str, version: str, job: str, arch: str) -> str:
     """按契约生成声明式配置：受控 Job、独占占用、固定参数模板与超时。"""
     return (

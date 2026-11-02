@@ -1,25 +1,46 @@
-"""演示执行域：已发布配置 + 匹配空闲环境 → running → 终态 → 清理释放。
+"""执行域：已发布配置 + 匹配空闲环境 → 独占占用 → Jenkins 动态调度 → 终态回同步 → 清理释放。
 
-本轮为模拟执行（无真实 Jenkins 调用），但占用边界与状态机与生产一致；
-持久协调器（queue/build 对账、background_tasks）为 Jenkins 接入阶段实现。
+ARGUS_JENKINS_URL 未配置时保持演示模拟（mock）；配置后 start_run 走真实 Jenkins API：
+1. 先持久化运行与执行意图（pipeline_executions，含 ARGUS_TOKEN），再提交构建——至多提交一次；
+2. 提交结果不明（网络/超时）转入 reconciling，由后台调度器或 /runs/reconcile 按 token 对账；
+3. queue → build → 终态逐段回同步；终态自动进入清理释放（复用既有清理与设备释放语义）。
 """
 from __future__ import annotations
 
+import hashlib
+import json
 from datetime import timedelta
+from uuid import uuid4
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from ..config import settings
 from ..errors import BusinessError
 from ..models import (
-    Device, Environment, Lease, LeaseResource, PipelineDefinition, PipelineRun,
-    PipelineVersion, User,
+    Device, Environment, Lease, LeaseResource, PipelineDefinition, PipelineExecution,
+    PipelineRun, PipelineVersion, User,
 )
 from ..state import device_occupancy, env_device_ids
 from . import WORKSPACE_ID, get_user, next_id, now, record_event
+from .jenkins import JenkinsClient, JenkinsError, connection_config, job_name_for
 from .leases import _borrow_failure
+from .pipelines import draft_content
 from .resource_locks import lock_resources
 from .maintenance import create_isolation_record
+
+
+def jenkins_client() -> JenkinsClient | None:
+    config = connection_config()
+    return JenkinsClient(config) if config else None
+
+
+def _runtime_graph(version: PipelineVersion) -> dict:
+    content = draft_content(version)
+    graph = content.get("graph")
+    if not graph or not graph.get("nodes"):
+        raise BusinessError("该版本为旧版声明式配置，请先在编排中保存为 DAG 版本后再启动。")
+    return graph
 
 
 def start_run(session: Session, actor_id: str, payload: dict) -> dict:
@@ -49,7 +70,7 @@ def start_run(session: Session, actor_id: str, payload: dict) -> dict:
         raise BusinessError(f"{failure['reason']}。")
     started = now()
     lease = Lease(id=next_id(session, Lease, "LEASE"), workspace_id=WORKSPACE_ID,
-                  kind="run", holder_subject=actor.id, purpose=f"{definition.name} 演示执行",
+                  kind="run", holder_subject=actor.id, purpose=f"{definition.name} 执行",
                   status="active", start_at=started,
                   expires_at=started + timedelta(hours=8), hours=8)
     session.add(lease)
@@ -60,19 +81,168 @@ def start_run(session: Session, actor_id: str, payload: dict) -> dict:
                                   active=True,
                                   device_snapshot={"name": device.name if device else device_id,
                                                    "holder": actor.name}))
+    run_id = next_id(session, PipelineRun, "RUN")
+    client = jenkins_client()
+    if client is None:
+        # 演示模拟：与既有行为一致，不触碰 Jenkins。
+        run = PipelineRun(
+            id=run_id, workspace_id=WORKSPACE_ID,
+            pipeline_version_id=version.id, lease_id=lease.id, environment_id=env.id,
+            name=definition.name, params_snapshot={"IMAGE_REF": "os-24.03-rc2.img", "TEST_SUITE": "smoke"},
+            image_ref="os-24.03-rc2.img", os_version_text="OS 24.03 RC2",
+            jenkins_job=definition.job_ref or "#mock", jenkins_queue="queue-mock", jenkins_build="#mock",
+            status="running", started_by=actor.id, cleanup_state="pending")
+        session.add(run)
+        session.flush()
+        record_event(session, actor_id=actor.id, action="run_activity", entity_type="run",
+                     entity_id=run.id, payload={"text": f"{run.id} 已启动 {run.name}"})
+        session.flush()
+        return run_dict_of(session, run)
+    graph = _runtime_graph(version)
+    install_nodes = [n for n in graph["nodes"] if n["type"] == "install"]
+    if {n["config"].get("envId", "") for n in install_nodes} != {env.id}:
+        raise BusinessError("编排中的环境安装节点与所选执行环境不一致，请更新编排或选择匹配环境。")
+    image_ref = install_nodes[0]["config"].get("imageRef", "")
+    cases = sorted({ref["id"] for n in graph["nodes"] if n["type"] == "cases"
+                    for ref in n["config"].get("caseRefs", [])})
+    token = uuid4().hex
+    params = {"IMAGE_REF": image_ref, "TEST_SUITE": "smoke", "ENV_ID": env.id,
+              "CASES": json.dumps(cases, ensure_ascii=False), "ARGUS_RUN_ID": run_id,
+              "ARGUS_TOKEN": token, "ARGUS_CONTENT_HASH": version.content_hash}
+    job = job_name_for(settings().jenkins_job_prefix, definition.id)
     run = PipelineRun(
-        id=next_id(session, PipelineRun, "RUN"), workspace_id=WORKSPACE_ID,
+        id=run_id, workspace_id=WORKSPACE_ID,
         pipeline_version_id=version.id, lease_id=lease.id, environment_id=env.id,
-        name=definition.name, params_snapshot={"IMAGE_REF": "os-24.03-rc2.img", "TEST_SUITE": "smoke"},
-        image_ref="os-24.03-rc2.img", os_version_text="OS 24.03 RC2",
-        jenkins_job=definition.job_ref or "#mock", jenkins_queue="queue-mock", jenkins_build="#mock",
-        status="running", started_by=actor.id, cleanup_state="pending")
+        name=definition.name, params_snapshot={"IMAGE_REF": image_ref, "TEST_SUITE": "smoke"},
+        image_ref=image_ref, os_version_text=env.os_version_text or "OS 24.03",
+        jenkins_job=job, jenkins_queue="", jenkins_build="",
+        status="reconciling", started_by=actor.id, cleanup_state="pending", evidence_refs={})
     session.add(run)
     session.flush()
+    session.add(PipelineExecution(
+        run_id=run_id, actor_id=actor.id, request_key=f"run:{run_id}",
+        request_hash=hashlib.sha256(
+            json.dumps(params, sort_keys=True, ensure_ascii=False).encode()).hexdigest(),
+        snapshot={"job": job, "params": params, "contentHash": version.content_hash,
+                  "caseCount": len(cases), "submitted": False, "queue": "", "build": ""},
+        nodes=[{"id": n["id"], "type": n["type"], "name": n["name"]} for n in graph["nodes"]]))
+    session.flush()
+    record_event(session, actor_id=actor.id, action="run_activity", entity_type="run",
+                 entity_id=run_id, payload={"text": f"{run_id} 已编排 {definition.name}，等待调度"})
+    # 意图先落库再提交外部任务：此处先提交事务，提交结果不明时可按 ARGUS_TOKEN 对账。
+    session.commit()
+    _dispatch(session, run, client)
     record_event(session, actor_id=actor.id, action="run_activity", entity_type="run",
                  entity_id=run.id, payload={"text": f"{run.id} 已启动 {run.name}"})
     session.flush()
     return run_dict_of(session, run)
+
+
+def _dispatch(session: Session, run: PipelineRun, client: JenkinsClient) -> None:
+    """同步动态 Job 并一次性提交构建；结果不明时保持 reconciling 交由对账，绝不重提。"""
+    execution = session.get(PipelineExecution, run.id)
+    snapshot = execution.snapshot
+    if snapshot.get("submitted"):
+        return
+    snapshot = dict(snapshot)
+    snapshot["submitted"] = True
+    execution.snapshot = snapshot  # JSON 整体替换，保证状态转换被持久化
+    session.flush()
+    session.commit()  # 「已提交」标记先于网络调用落库
+    try:
+        version = session.get(PipelineVersion, run.pipeline_version_id)
+        definition = session.get(PipelineDefinition, version.definition_id)
+        from .provisioning import sync_pipeline_job
+        sync_pipeline_job(session, run.started_by, definition, version)
+        result = client.submit(snapshot["job"], snapshot["params"])
+    except (JenkinsError, BusinessError):
+        run.status = "reconciling"
+        session.flush()
+        return
+    snapshot = dict(execution.snapshot)
+    snapshot.update({"queue": str(result["queue"])})
+    execution.snapshot = snapshot
+    run.jenkins_queue = str(result["queue"])
+    run.status = "running"
+    session.flush()
+
+
+def reconcile_run(session: Session, run: PipelineRun) -> dict:
+    """单运行对账：queue → build → 终态；终态自动清理释放。仅处理有执行意图的运行。"""
+    execution = session.get(PipelineExecution, run.id)
+    if execution is None:
+        return run_dict_of(session, run)
+    client = jenkins_client()
+    if client is None:
+        return run_dict_of(session, run)
+    snapshot = execution.snapshot
+    if not snapshot.get("submitted"):
+        _dispatch(session, run, client)
+        return run_dict_of(session, run)
+    token = snapshot["params"]["ARGUS_TOKEN"]
+    try:
+        outcome = client.poll(snapshot["job"], token,
+                              queue_id=run.jenkins_queue or snapshot.get("queue", ""),
+                              build=run.jenkins_build or snapshot.get("build", ""))
+    except JenkinsError:
+        run.status = "reconciling"
+        session.flush()
+        return run_dict_of(session, run)
+    if outcome.get("build") and outcome["build"] != run.jenkins_build:
+        run.jenkins_build = outcome["build"]
+        snapshot = dict(snapshot)
+        snapshot["build"] = outcome["build"]
+        execution.snapshot = snapshot
+    if outcome["status"] == "queued":
+        run.status = "running"
+        run.progress = max(run.progress, 10)
+    elif outcome["status"] == "running":
+        run.status = "running"
+        run.progress = max(run.progress, 50)
+    elif outcome["status"] in ("success", "failed"):
+        _complete_run(session, run, execution, outcome)
+    session.flush()
+    return run_dict_of(session, run)
+
+
+def _complete_run(session: Session, run: PipelineRun, execution: PipelineExecution, outcome: dict) -> None:
+    """Jenkins 终态 → 运行终态 → 自动清理释放（复用既有清理语义，复核视为通过）。"""
+    success = outcome["status"] == "success"
+    total = int(execution.snapshot.get("caseCount") or 0)
+    run.status = "cleaning"
+    run.result = "success" if success else "failed"
+    run.progress = 100
+    run.total = total
+    run.passed = total if success else 0
+    run.evidence_count = 1
+    run.evidence_refs = {"jenkinsConsole": outcome.get("buildUrl", ""),
+                         "jenkinsResult": outcome.get("result", "")}
+    run.ended_at = now()
+    duration = (run.ended_at - run.started_at).total_seconds() / 60
+    run.duration_minutes = max(1, round(duration))
+    record_event(session, actor_id=run.started_by, action="run_activity", entity_type="run",
+                 entity_id=run.id, tone="amber",
+                 payload={"text": f"{run.id} Jenkins 构建终态 {outcome.get('result', '')}，进入清理"})
+    session.flush()
+    try:
+        cleanup_run(session, run.started_by, run.id, healthy=True)
+    except BusinessError:
+        # 并发对账（worker 与手动入口）下另一个会话已完成清理；本会话状态以数据库为准。
+        session.rollback()
+
+
+def reconcile_active_runs(session: Session) -> dict:
+    """批量对账所有运行中/对账中的运行（REST/worker 共用）。每个运行独立提交，互不拖累。"""
+    runs = session.execute(
+        select(PipelineRun).where(PipelineRun.status.in_(("running", "reconciling")))).scalars().all()
+    checked, finished = 0, []
+    for run in runs:
+        checked += 1
+        reconcile_run(session, run)
+        if run.status in ("success", "failed"):
+            finished.append(run.id)
+        session.commit()
+    return {"checked": checked, "finished": finished}
 
 
 def finish_run(session: Session, actor_id: str, run_id: str, success: bool = True) -> dict:
@@ -145,4 +315,6 @@ def run_dict_of(session: Session, run: PipelineRun) -> dict:
         "started": run.started_at.isoformat(), "artifact": run.image_ref,
         "config": f"{definition.id if definition else '?'}@{version.version if version else '?'}",
         "evidence": run.evidence_count, "cleanupState": run.cleanup_state,
+        "jobRef": run.jenkins_job, "queueId": run.jenkins_queue,
+        "consoleUrl": (run.evidence_refs or {}).get("jenkinsConsole", ""),
     }

@@ -97,6 +97,7 @@ def pipeline_dicts(session: Session) -> list[dict]:
         result.append({
             "id": d.id, "name": d.name, "version": version_label,
             "status": v.status if v else "draft", "job": d.job_ref, "arch": d.architecture,
+            "jobSyncState": d.job_sync_state, "jobSyncedHash": d.job_synced_hash,
             "date": (v.published_at or v.__dict__.get("created_at")).date().isoformat()
                     if v and (v.published_at or getattr(v, "created_at", None)) else "",
             "description": d.description,
