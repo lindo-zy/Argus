@@ -46,15 +46,15 @@ env ARGUS_DIR=/opt/argus ARGUS_REPO_URL=<仓库地址> ARGUS_BRANCH=main \
 
 ```sh
 docker compose -f deploy/jenkins.dev.yml up -d      # 端口 127.0.0.1:18090
-# 首次启动后生成 API Token（用户 argus，密码 ARGUS_JENKINS_PASSWORD，默认 argus-local-demo）：
+# 首次启动后生成 API Token（用户 admin，密码 ARGUS_JENKINS_PASSWORD，默认 admin）：
 python3 - <<'PY'
 import base64, json, urllib.request
 base = "http://127.0.0.1:18090"
-auth = base64.b64encode(b"argus:argus-local-demo").decode()
+auth = base64.b64encode(b"admin:admin").decode()
 opener = urllib.request.build_opener(urllib.request.HTTPCookieProcessor())
 req = urllib.request.Request(base + "/crumbIssuer/api/json", headers={"Authorization": "Basic " + auth})
 crumb = json.loads(opener.open(req).read())
-req = urllib.request.Request(base + "/user/argus/descriptorByName/jenkins.security.ApiTokenProperty/generateNewToken",
+req = urllib.request.Request(base + "/user/admin/descriptorByName/jenkins.security.ApiTokenProperty/generateNewToken",
     data=b"newTokenName=argus-dev",
     headers={"Authorization": "Basic " + auth, crumb["crumbRequestField"]: crumb["crumb"],
              "Content-Type": "application/x-www-form-urlencoded"})
@@ -66,7 +66,7 @@ PY
 
 ```sh
 ARGUS_JENKINS_URL=http://127.0.0.1:18090
-ARGUS_JENKINS_USERNAME=argus
+ARGUS_JENKINS_USERNAME=admin
 ARGUS_JENKINS_TOKEN=<上一步生成的 token>
 ```
 
