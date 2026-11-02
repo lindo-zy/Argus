@@ -236,3 +236,59 @@ def pipeline_xml(pid: str, name: str, version: str, job: str, arch: str) -> str:
         '  <execution timeoutMinutes="120" />\n'
         '</pipeline>'
     )
+
+
+def legacy_graph(arch: str) -> dict:
+    """Explicit migration template; operator must supply an image before publishing."""
+    return {'schema': 1, 'nodes': [
+        {'id': 'install', 'name': '环境安装', 'type': 'install', 'position': {'x': 70, 'y': 160},
+         'config': {'envId': '', 'imageRef': ''}},
+        {'id': 'cases', 'name': '用例执行', 'type': 'cases', 'position': {'x': 360, 'y': 160},
+         'config': {'caseRefs': [], 'mode': 'sequential', 'failure': 'stop'}},
+    ], 'edges': [{'id': 'install-cases', 'source': 'install', 'target': 'cases'}]}
+
+
+def copy_pipeline(session: Session, actor_id: str, pid: str) -> dict:
+    get_user(session, actor_id)
+    definition = session.execute(select(PipelineDefinition).where(
+        PipelineDefinition.id == pid, PipelineDefinition.workspace_id == WORKSPACE_ID).with_for_update()).scalar_one_or_none()
+    if not definition:
+        raise BusinessError('流水线不存在。')
+    versions = session.execute(select(PipelineVersion).where(PipelineVersion.definition_id == pid)).scalars().all()
+    version = max(versions, key=lambda v: int(v.version.removeprefix('v')) if v.version.removeprefix('v').isdigit() else 0, default=None)
+    if not version:
+        raise BusinessError('流水线版本不存在。')
+    source_graph = draft_content(version)['graph']
+    graph = source_graph or legacy_graph(definition.architecture)
+    result = save_pipeline(session, actor_id, {'name': definition.name[:114] + ' · 副本',
+        'description': definition.description, 'arch': definition.architecture, 'graph': graph})
+    return {**result, 'convertedLegacy': source_graph is None}
+
+
+def publish_pipeline(session: Session, actor_id: str, pid: str, payload: dict) -> dict:
+    # Publishing is distinct from run authorization. Only admins may freeze configuration.
+    from . import require_admin
+    actor = require_admin(session, actor_id, '发布流水线')
+    definition = session.execute(select(PipelineDefinition).where(
+        PipelineDefinition.id == pid, PipelineDefinition.workspace_id == WORKSPACE_ID).with_for_update()).scalar_one_or_none()
+    if not definition:
+        raise BusinessError('流水线不存在。')
+    version = session.execute(select(PipelineVersion).where(
+        PipelineVersion.definition_id == pid).with_for_update()).scalar_one()
+    if version.status == 'published':
+        if payload.get('contentHash') != version.content_hash:
+            raise BusinessError('配置已变化，请刷新后重试。', code='pipeline_conflict')
+        return {'id': pid, 'pipelineVersionId': version.id, 'contentHash': version.content_hash}
+    content = draft_content(version)
+    if (set(payload) != {'expectedRevision', 'contentHash'} or not version.content_hash or
+            type(payload['expectedRevision']) is not int or payload['expectedRevision'] != content['editRevision'] or
+            payload['contentHash'] != version.content_hash):
+        raise BusinessError('配置已变化，请重新打开草稿并核对后发布。', code='pipeline_conflict')
+    result = validate_pipeline(session, actor.id, {'arch': definition.architecture, 'graph': content['graph']})
+    if not result['valid']:
+        raise BusinessError('发布前请修复编排：' + '；'.join(i['message'] for i in result['issues']))
+    version.status, version.published_by, version.published_at = 'published', actor.id, now()
+    record_event(session, actor_id=actor.id, action='pipeline_publish', entity_type='pipeline', entity_id=pid,
+        payload={'text': f'{actor.name} 发布了流水线 {definition.name}', 'contentHash': version.content_hash})
+    session.flush()
+    return {'id': pid, 'pipelineVersionId': version.id, 'contentHash': version.content_hash}

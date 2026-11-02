@@ -1,0 +1,40 @@
+// Use this file for both controlled parameterized Pipeline jobs:
+// argus-install and argus-cases. No device commands are executed.
+pipeline {
+    agent any
+    parameters {
+        string(name: 'ARGUS_TOKEN', defaultValue: '', description: 'Unique attempt correlation token; must be retained')
+        string(name: 'RUN_ID', defaultValue: '')
+        string(name: 'NODE_ID', defaultValue: '')
+        string(name: 'ENV_ID', defaultValue: '')
+        string(name: 'IMAGE_REF', defaultValue: '')
+        string(name: 'DEVICE_IDS', defaultValue: '[]')
+        text(name: 'CASE_REFS', defaultValue: '[]')
+        string(name: 'PIPELINE_HASH', defaultValue: '')
+    }
+    options {
+        timeout(time: 10, unit: 'MINUTES')
+        timestamps()
+    }
+    stages {
+        stage('Validate Argus contract') {
+            steps {
+                script {
+                    if (!params.ARGUS_TOKEN || !params.RUN_ID || !params.NODE_ID || !params.ENV_ID || !params.IMAGE_REF || !params.PIPELINE_HASH) {
+                        error('Required Argus snapshot parameters are missing')
+                    }
+                    echo "MOCK ONLY: run=${params.RUN_ID}, node=${params.NODE_ID}, environment=${params.ENV_ID}"
+                }
+            }
+        }
+        stage('Mock execution') {
+            steps {
+                sleep(time: 3, unit: 'SECONDS')
+                script {
+                    // Name a node mock-fail in the Argus DAG to exercise failure policy.
+                    if (params.NODE_ID == 'mock-fail') { error('Intentional mock failure') }
+                }
+            }
+        }
+    }
+}

@@ -1,0 +1,16 @@
+# Standalone disposable Jenkins only. Does not join or modify the Argus stack.
+# Start: docker compose -f deploy/docker-compose.jenkins-local.yml up -d
+# Stop (retains mock state): docker compose -f deploy/docker-compose.jenkins-local.yml down
+name: argus-jenkins-local
+services:
+  jenkins:
+    image: jenkins/jenkins:2.580.2-lts-jdk21
+    environment:
+      JAVA_OPTS: -Djenkins.install.runSetupWizard=false -Xmx512m
+    ports:
+      - "127.0.0.1:18081:8080"
+    volumes:
+      - jenkins_local_data:/var/jenkins_home
+      - ../backend/jenkins/init-local-mock.groovy:/var/jenkins_home/init.groovy.d/argus-mock.groovy:ro
+volumes:
+  jenkins_local_data:

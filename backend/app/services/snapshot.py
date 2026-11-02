@@ -13,6 +13,7 @@ from ..models import (
     PipelineVersion, ResourceEvent, User,
 )
 from ..state import device_occupancy
+from ..config import settings
 from . import WORKSPACE_ID, revision_of
 from .devices import device_dict
 from .environments import environment_dict
@@ -59,6 +60,8 @@ def build_snapshot(session: Session) -> dict:
         "runs": [run_dict_of(session, r) for r in runs],
         "maintenance": [maintenance_dict(session, r) for r in records],
         "pipelines": pipeline_dicts(session),
+        "scheduler": {"configured": bool(settings().jenkins_url), "kind": settings().jenkins_kind,
+                      "workerEnabled": settings().jenkins_worker_enabled},
         "testCases": CASE_CATALOG,
         "issues": [dict(i) for i in ISSUES_FIXTURE],
         "activities": [{"time": e.occurred_at.astimezone().strftime("%H:%M"),

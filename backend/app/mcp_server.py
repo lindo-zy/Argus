@@ -267,6 +267,23 @@ def list_events(entity_type: str = "", entity_id: str = "", limit: int = 20,
     return _run(handler)
 
 
+@mcp.tool(description="复制流水线为独立 DAG 草稿，不触发任务。")
+def copy_pipeline(pipeline_id: str, ctx: Context = None) -> dict:
+    return _run(lambda session: pipeline_service.copy_pipeline(session, _actor(session, ctx).id, pipeline_id))
+
+
+@mcp.tool(description="管理员校验并发布 DAG 配置；不占用设备、不触发 Jenkins。")
+def publish_pipeline(pipeline_id: str, expected_revision: int, content_hash: str, ctx: Context = None) -> dict:
+    return _run(lambda session: pipeline_service.publish_pipeline(session, _actor(session, ctx).id, pipeline_id,
+        {'expectedRevision': expected_revision, 'contentHash': content_hash}))
+
+
+@mcp.tool(description="持久调度 Jenkins DAG。提供唯一 request_key 防止重放；只使用服务端受控 Job。")
+def start_pipeline_run(pipeline_version_id: str, env_id: str, request_key: str, ctx: Context = None) -> dict:
+    return _run(lambda session: run_service.start_run(session, _actor(session, ctx).id,
+        {'pipelineVersionId': pipeline_version_id, 'envId': env_id, 'requestKey': request_key, 'executionMode': 'jenkins'}))
+
+
 @mcp.tool(description="启动演示执行任务：需要已发布流水线版本 ID 与匹配架构的空闲环境。")
 def start_demo_run(pipeline_version_id: str, env_id: str, ctx: Context = None) -> dict:
     def handler(session: Session) -> dict:

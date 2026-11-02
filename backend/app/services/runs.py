@@ -1,8 +1,4 @@
-"""演示执行域：已发布配置 + 匹配空闲环境 → running → 终态 → 清理释放。
-
-本轮为模拟执行（无真实 Jenkins 调用），但占用边界与状态机与生产一致；
-持久协调器（queue/build 对账、background_tasks）为 Jenkins 接入阶段实现。
-"""
+"""运行入口、旧样本兼容与人工清理复核；Jenkins DAG 由 orchestration 持久推进。"""
 from __future__ import annotations
 
 from datetime import timedelta
@@ -13,7 +9,7 @@ from sqlalchemy.orm import Session
 from ..errors import BusinessError
 from ..models import (
     Device, Environment, Lease, LeaseResource, PipelineDefinition, PipelineRun,
-    PipelineVersion, User,
+    PipelineVersion, PipelineExecution, User,
 )
 from ..state import device_occupancy, env_device_ids
 from . import WORKSPACE_ID, get_user, next_id, now, record_event
@@ -23,6 +19,16 @@ from .maintenance import create_isolation_record
 
 
 def start_run(session: Session, actor_id: str, payload: dict) -> dict:
+    if payload.get('executionMode') == 'jenkins' or payload.get('requestKey'):
+        from .orchestration import start_execution
+        return start_execution(session, actor_id, payload)
+    # Preserve legacy clients for sample XML runs; DAG execution always uses Jenkins.
+    candidate = session.get(PipelineVersion, payload.get('pipelineVersionId') or '')
+    if not candidate and payload.get('pipelineId'):
+        candidate = session.execute(select(PipelineVersion).where(
+            PipelineVersion.definition_id == payload['pipelineId'], PipelineVersion.schema_version == 2)).scalars().first()
+    if candidate and candidate.schema_version == 2:
+        raise BusinessError('DAG 运行必须提供 executionMode=jenkins 和 requestKey。')
     actor = get_user(session, actor_id)
     version = None
     if payload.get("pipelineVersionId"):
@@ -78,6 +84,8 @@ def start_run(session: Session, actor_id: str, payload: dict) -> dict:
 def finish_run(session: Session, actor_id: str, run_id: str, success: bool = True) -> dict:
     actor = get_user(session, actor_id)
     run = session.get(PipelineRun, run_id)
+    if run and session.get(PipelineExecution, run_id):
+        raise BusinessError('Jenkins 运行只能由外部任务对账确认终态，不能模拟结束。')
     if not run or run.status not in ("running", "reconciling"):
         raise BusinessError("任务当前状态不可结束。")
     run.status = "cleaning"
@@ -97,6 +105,18 @@ def cleanup_run(session: Session, actor_id: str, run_id: str, healthy: bool) -> 
     run = session.get(PipelineRun, run_id)
     if not run or run.status != "cleaning":
         raise BusinessError("必须确认任务终态后再清理释放。")
+    if type(healthy) is not bool:
+        raise BusinessError('请明确提供清理复核结论。')
+    execution = session.get(PipelineExecution, run.id)
+    if execution and actor.id != run.started_by and actor.role != 'admin':
+        raise BusinessError('只有执行人或管理员可以记录该运行的清理复核。')
+    env_ids = [e['id'] for e in execution.snapshot['environments']] if execution else [run.environment_id]
+    device_ids_snapshot = [d['id'] for d in execution.snapshot['devices']] if execution else []
+    lock_resources(session, env_ids, device_ids_snapshot)
+    run = session.execute(select(PipelineRun).where(PipelineRun.id == run_id).with_for_update()
+                          .execution_options(populate_existing=True)).scalar_one()
+    if run.status != 'cleaning':
+        raise BusinessError('任务已完成清理，请刷新。')
     device_ids = []
     if run.lease_id:
         rows = session.execute(select(LeaseResource).where(
@@ -122,9 +142,14 @@ def cleanup_run(session: Session, actor_id: str, run_id: str, healthy: bool) -> 
             if device:
                 device.operational_state = "isolated"
                 device.health_state = "unhealthy"
-        create_isolation_record(session, actor_id=actor.id, environment_ids=[run.environment_id],
+        create_isolation_record(session, actor_id=actor.id, environment_ids=env_ids,
                                 device_ids=device_ids, reason=f"{run.id} 清理异常，设备已隔离")
-    run.evidence_count = 5
+    execution = session.get(PipelineExecution, run.id)
+    if run.lease_id:
+        lease = session.get(Lease, run.lease_id)
+        lease.status = 'released' if healthy else 'isolated'
+    if not execution:
+        run.evidence_count = 5
     record_event(session, actor_id=actor.id, action="run_activity", entity_type="run",
                  entity_id=run.id, tone="green" if healthy else "red",
                  payload={"text": f"{run.id} 清理{'通过，设备已释放' if healthy else '异常，设备已隔离'}"})
@@ -136,7 +161,13 @@ def run_dict_of(session: Session, run: PipelineRun) -> dict:
     starter = session.get(User, run.started_by)
     version = session.get(PipelineVersion, run.pipeline_version_id)
     definition = session.get(PipelineDefinition, version.definition_id) if version else None
+    execution = session.get(PipelineExecution, run.id)
     return {
+        'executionMode': execution.snapshot['connection']['kind'] if execution else 'demo',
+        'nodes': [{k: v for k, v in n.items() if k not in ('params', 'token')} for n in execution.nodes] if execution else [],
+        'environmentSnapshots': execution.snapshot['environments'] if execution else [],
+        'contentHash': execution.snapshot['contentHash'] if execution else '',
+        'evidenceRefs': run.evidence_refs,
         "id": run.id, "envId": run.environment_id, "name": run.name,
         "status": run.status, "progress": run.progress, "passed": run.passed,
         "total": run.total, "duration": run.duration_minutes, "build": run.jenkins_build,

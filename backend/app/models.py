@@ -241,7 +241,7 @@ class PipelineVersion(Base):
 
 
 class PipelineRun(Base):
-    """运行固化配置、参数、制品与外部 ID；run 不依赖当前资产配置。本轮执行为演示模拟。"""
+    """运行固化配置、参数、制品与外部 ID；run 不依赖当前资产配置；新 DAG 由持久 Jenkins 协调器执行。"""
 
     __tablename__ = "pipeline_runs"
     id: Mapped[str] = mapped_column(String(64), primary_key=True)
@@ -272,7 +272,7 @@ class PipelineRun(Base):
 
 
 class BackgroundTask(Base):
-    """可恢复任务登记（提交/轮询/对账/清理/重试）；持久协调器为 Jenkins 接入阶段实现。"""
+    """持久任务登记；jenkins_dag 使用 owner/claim_until 认领、轮询与崩溃恢复。"""
 
     __tablename__ = "background_tasks"
     id: Mapped[str] = mapped_column(String(64), primary_key=True)
@@ -286,3 +286,19 @@ class BackgroundTask(Base):
     claim_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     dedupe_key: Mapped[str] = mapped_column(String(128), default="")
     last_error: Mapped[str] = mapped_column(Text, default="")
+
+
+class PipelineExecution(Base):
+    """Immutable run input and durable per-node attempts; each node submits at most once.
+
+    Existing BackgroundTask owns the renewable worker claim. JSON is replaced, never
+    mutated in place, so SQLAlchemy persists each state transition.
+    """
+    __tablename__ = "pipeline_executions"
+    run_id: Mapped[str] = mapped_column(String(64), ForeignKey("pipeline_runs.id"), primary_key=True)
+    actor_id: Mapped[str] = mapped_column(String(64), nullable=False)
+    request_key: Mapped[str] = mapped_column(String(128), nullable=False)
+    request_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    snapshot: Mapped[dict] = mapped_column(JSONB, nullable=False)
+    nodes: Mapped[list] = mapped_column(JSONB, nullable=False)
+    __table_args__ = (UniqueConstraint("actor_id", "request_key", name="uq_execution_request"),)

@@ -13,6 +13,14 @@ class Settings:
             "ARGUS_DATABASE_URL",
             "postgresql+psycopg://argus:argus@127.0.0.1:5433/argus",
         )
+        self.jenkins_url = os.environ.get("ARGUS_JENKINS_URL", "")
+        self.jenkins_kind = os.environ.get("ARGUS_JENKINS_KIND", "jenkins")
+        self.jenkins_install_job = os.environ.get("ARGUS_JENKINS_INSTALL_JOB", "argus-install")
+        self.jenkins_cases_job = os.environ.get("ARGUS_JENKINS_CASES_JOB", "argus-cases")
+        self.jenkins_username = os.environ.get("ARGUS_JENKINS_USERNAME", "")
+        self.jenkins_token = os.environ.get("ARGUS_JENKINS_TOKEN", "")
+        self.jenkins_timeout = 5
+        self.jenkins_worker_enabled = os.environ.get("ARGUS_JENKINS_WORKER", "1") == "1"
         self.default_workspace_id: str = "WS-DEFAULT"
         # 演示身份：真实身份源接入前的过渡方案（docs/05 待调研项）。
         self.bootstrap_admin_token: str = os.environ.get("ARGUS_ADMIN_TOKEN", "argus-demo-admin")

@@ -120,11 +120,36 @@ export function createMockApi({ storage = null, latency = 240, now = () => new D
           data.pipelines.unshift(pipeline)
         }
         Object.assign(pipeline, { name: payload.name.trim(), description: (payload.description || '').trim(), arch: payload.arch, graph,
-          editRevision: (pipeline.editRevision || 0) + 1, date: now().toISOString().slice(0, 10), updatedAt: now().toISOString() })
+          contentHash: 'browser-demo-' + ((pipeline.editRevision || 0) + 1), editRevision: (pipeline.editRevision || 0) + 1, date: now().toISOString().slice(0, 10), updatedAt: now().toISOString() })
         const escape = value => value.replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;').replaceAll('"', '&quot;')
         pipeline.xml = `<pipeline id="${escape(pipeline.id)}" name="${escape(pipeline.name)}" version="${pipeline.version}" schemaVersion="2"><orchestration format="dag-json">${escape(JSON.stringify({ graph, editRevision: pipeline.editRevision, updatedAt: pipeline.updatedAt }))}</orchestration></pipeline>`
         activity(data, `${actor.name} 保存了流水线草稿 ${pipeline.name}`)
-        return { id: pipeline.id, editRevision: pipeline.editRevision, contentHash: '' }
+        return { id: pipeline.id, editRevision: pipeline.editRevision, contentHash: pipeline.contentHash }
+      })
+    },
+    async copyPipeline(id) {
+      const data = read(); me(data)
+      const source = data.pipelines.find(p => p.id === id)
+      if (!source) throw new Error('流水线不存在。')
+      const graph = source.graph || { schema: 1, nodes: [
+        { id: 'install', name: '环境安装', type: 'install', position: { x: 70, y: 160 }, config: { envId: '', imageRef: '' } },
+        { id: 'cases', name: '用例执行', type: 'cases', position: { x: 360, y: 160 }, config: { caseRefs: [], mode: 'sequential', failure: 'stop' } },
+      ], edges: [{ id: 'install-cases', source: 'install', target: 'cases' }] }
+      const response = await this.savePipeline({ name: source.name.slice(0, 114) + ' · 副本', description: source.description, arch: source.arch, graph: clone(graph) })
+      response.result.convertedLegacy = !source.graph
+      return response
+    },
+    publishPipeline(id, payload) {
+      return mutate(data => {
+        requireAdmin(data, '发布流水线')
+        const pipeline = data.pipelines.find(p => p.id === id)
+        if (!pipeline?.graph) throw new Error('请先复制为 DAG 编排草稿。')
+        if (pipeline.status === 'published' && payload.contentHash === pipeline.contentHash) return { id, pipelineVersionId: pipeline.pipelineVersionId, contentHash: pipeline.contentHash }
+        if (payload.expectedRevision !== pipeline.editRevision || payload.contentHash !== pipeline.contentHash) throw new Error('配置已变化，请刷新后重试。')
+        const issues = graphIssues(normalizeGraph(pipeline.graph, data.testCases, pipeline.arch), data.environments, pipeline.arch)
+        if (issues.length) throw new Error('发布前请修复编排：' + issues.map(i => i.message).join('；'))
+        pipeline.status = 'published'; pipeline.pipelineVersionId = `${id}-v1`
+        return { id, pipelineVersionId: pipeline.pipelineVersionId, contentHash: pipeline.contentHash }
       })
     },
     reset() { return mutate(data => { requireAdmin(data, '重置演示数据'); Object.assign(data, createSeed()); activity(data, '已恢复初始演示数据', 'green') }) },
@@ -229,7 +254,8 @@ export function createMockApi({ storage = null, latency = 240, now = () => new D
         activity(data, `${scopeLabel(data, record)} 维护复核${healthy ? '通过，恢复可用' : '异常，保持隔离'}`, healthy ? 'green' : 'red')
       })
     },
-    startRun({ pipelineId, envId }) {
+    startRun({ pipelineId, envId, executionMode, requestKey }) {
+      if (executionMode === 'jenkins' || requestKey) throw new Error('浏览器 Mock 不会调度 Jenkins，请连接已配置 Jenkins 的后端服务。')
       return mutate(data => {
         const pipeline = data.pipelines.find(p => p.id === pipelineId)
         if (!pipeline || pipeline.status !== 'published') throw new Error('只有已发布配置可以启动任务。')

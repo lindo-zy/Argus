@@ -49,6 +49,16 @@ def save_pipeline_draft(payload: dict, session: Session = Depends(get_session),
     return commit_and_respond(session, pipeline_service.save_pipeline(session, actor, payload))
 
 
+@router.post('/pipelines/{pipeline_id}/copy')
+def copy_pipeline(pipeline_id: str, session: Session = Depends(get_session), actor: str = Depends(actor_id_header)) -> dict:
+    return commit_and_respond(session, pipeline_service.copy_pipeline(session, actor, pipeline_id))
+
+
+@router.post('/pipelines/{pipeline_id}/publish')
+def publish_pipeline(pipeline_id: str, payload: dict, session: Session = Depends(get_session), actor: str = Depends(actor_id_header)) -> dict:
+    return commit_and_respond(session, pipeline_service.publish_pipeline(session, actor, pipeline_id, payload))
+
+
 @router.post('/pipelines/validate')
 def validate_pipeline_draft(payload: dict, session: Session = Depends(get_session),
                             actor: str = Depends(actor_id_header)) -> dict:
@@ -254,7 +264,9 @@ def finish_run(run_id: str, payload: dict, session: Session = Depends(get_sessio
 @router.post("/runs/{run_id}/cleanup")
 def cleanup_run(run_id: str, payload: dict, session: Session = Depends(get_session),
                 actor: str = Depends(actor_id_header)) -> dict:
-    result = run_service.cleanup_run(session, actor, run_id, bool(payload.get("healthy", True)))
+    if type(payload.get('healthy')) is not bool:
+        raise BusinessError('请明确提供清理复核结论。')
+    result = run_service.cleanup_run(session, actor, run_id, payload['healthy'])
     return commit_and_respond(session, result)
 
 

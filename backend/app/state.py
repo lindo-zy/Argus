@@ -47,6 +47,12 @@ def device_occupancy(session: Session, workspace_id: str) -> dict[str, str]:
             occupancy[device_id] = "running"
         else:
             occupancy[device_id] = "leased"
+    # Run state follows lease device snapshots, including all DAG environments.
+    for did, state in session.execute(select(LeaseResource.device_id, PipelineRun.status)
+            .join(PipelineRun, PipelineRun.lease_id == LeaseResource.lease_id)
+            .where(LeaseResource.active.is_(True), PipelineRun.workspace_id == workspace_id,
+                   PipelineRun.status.in_(['reconciling', 'cleaning']))):
+        occupancy[did] = state
     if env_run_state:
         # run 的对账/清理覆盖其环境全部设备的派生状态。
         env_devices = session.execute(

@@ -29,6 +29,13 @@ services:
     container_name: argus-backend
     environment:
       ARGUS_DATABASE_URL: postgresql+psycopg://argus:argus@db:5432/argus
+      ARGUS_JENKINS_URL: ${ARGUS_JENKINS_URL:-}
+      ARGUS_JENKINS_KIND: ${ARGUS_JENKINS_KIND:-jenkins}
+      ARGUS_JENKINS_INSTALL_JOB: ${ARGUS_JENKINS_INSTALL_JOB:-argus-install}
+      ARGUS_JENKINS_CASES_JOB: ${ARGUS_JENKINS_CASES_JOB:-argus-cases}
+      ARGUS_JENKINS_USERNAME: ${ARGUS_JENKINS_USERNAME:-}
+      ARGUS_JENKINS_TOKEN: ${ARGUS_JENKINS_TOKEN:-}
+      ARGUS_JENKINS_WORKER: ${ARGUS_JENKINS_WORKER:-1}
     depends_on:
       db:
         condition: service_healthy

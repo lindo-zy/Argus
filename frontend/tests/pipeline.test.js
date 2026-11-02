@@ -130,3 +130,33 @@ test('HTTP adapter posts draft payloads with actor header and preserves conflict
   const denied = createHttpApi({ storage: null, fetch: async () => ({ ok: false, status: 400, json: async () => ({ detail: '草稿已被其他操作更新', code: 'pipeline_conflict' }) }) })
   await assert.rejects(denied.savePipeline({ id: 'PL-1', expectedRevision: 0 }), e => e.code === 'pipeline_conflict')
 })
+
+test('copy works for draft and published pipelines; publish freezes draft, browser refuses Jenkins execution', async () => {
+  const { api } = fixture()
+  const created = await api.savePipeline({ name: '复制源', arch: 'ARM64', graph: validGraph() })
+  const copied = await api.copyPipeline(created.result.id)
+  assert.notEqual(copied.result.id, created.result.id)
+  const p = copied.snapshot.pipelines.find(p => p.id === copied.result.id)
+  assert.deepEqual(p.graph, validGraph())
+  const released = await api.publishPipeline(p.id, { expectedRevision: p.editRevision, contentHash: p.contentHash })
+  assert.equal(released.snapshot.pipelines.find(x => x.id === p.id).status, 'published')
+  await assert.rejects(api.savePipeline({ id: p.id, name: p.name, arch: p.arch, graph: p.graph, expectedRevision: p.editRevision }), /已发布/)
+  const second = await api.copyPipeline(p.id)
+  assert.equal(second.snapshot.pipelines.find(x => x.id === second.result.id).status, 'draft')
+  assert.throws(() => api.startRun({ pipelineId: p.id, envId: 'ENV-ARM-01', executionMode: 'jenkins', requestKey: 'one' }), /浏览器 Mock 不会调度/)
+})
+
+test('HTTP copy/publish/run preserve exact payload and replay key', async () => {
+  const seen = []
+  const api = createHttpApi({ storage: null, fetch: async (url, options) => {
+    seen.push({ url, body: options.body && JSON.parse(options.body) })
+    return { ok: true, json: async () => ({ result: {}, snapshot: createSeed() }) }
+  } })
+  await api.copyPipeline('PL-copy')
+  await api.publishPipeline('PL-copy', { expectedRevision: 3, contentHash: 'hash' })
+  const payload = { pipelineVersionId: 'PV-1', envId: 'ENV-ARM-01', executionMode: 'jenkins', requestKey: 'same-key' }
+  await api.startRun(payload); await api.startRun(payload)
+  assert.ok(seen[0].url.endsWith('/api/pipelines/PL-copy/copy'))
+  assert.deepEqual(seen[1].body, { expectedRevision: 3, contentHash: 'hash' })
+  assert.deepEqual(seen[2].body, payload); assert.deepEqual(seen[3].body, payload)
+})
