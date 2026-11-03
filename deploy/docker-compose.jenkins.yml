@@ -1,0 +1,33 @@
+# 服务器专用 Jenkins：从本地开发实例整体迁移（jenkins_home 数据卷同名对接）。
+# 独立 compose，不进 argus 主项目；通过外部网络 argus_default 与 backend 内网互通。
+# 启动：docker compose -f deploy/docker-compose.jenkins.yml up -d
+# backend 连接配置写在服务器本地 deploy/.env（已 gitignore，不入库）：
+#   ARGUS_JENKINS_URL=http://jenkins:8080
+#   ARGUS_JENKINS_KIND=jenkins
+#   ARGUS_JENKINS_USERNAME=admin
+#   ARGUS_JENKINS_TOKEN=<token>
+# 仅绑回环 8090（实例为 admin/admin 弱口令，禁止暴露公网）；backend 经内网按服务名访问。
+# 内存受限服务器（1.6G）：JVM 堆上限 384m，容器上限 640m，防挤占 argus 主栈。
+name: argus-jenkins-server
+
+services:
+  jenkins:
+    image: jenkins/jenkins:lts
+    container_name: argus-jenkins-server
+    restart: unless-stopped
+    environment:
+      JAVA_OPTS: -Djenkins.install.runSetupWizard=false -Xmx384m -Dfile.encoding=UTF-8
+    mem_limit: 640m
+    ports:
+      - "127.0.0.1:8090:8080"
+    volumes:
+      - argus_jenkins_home:/var/jenkins_home
+
+networks:
+  default:
+    name: argus_default
+    external: true
+
+volumes:
+  argus_jenkins_home:
+    name: argus_jenkins_home
