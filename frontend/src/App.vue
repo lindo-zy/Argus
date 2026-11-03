@@ -10,6 +10,9 @@ import DashboardView from './views/DashboardView.vue'
 import PipelinesView from './views/PipelinesView.vue'
 import WorkspaceView from './views/WorkspaceView.vue'
 import TopologyView from './views/TopologyView.vue'
+import UpgradePipelinesView from './views/UpgradePipelinesView.vue'
+import PerfPipelinesView from './views/PerfPipelinesView.vue'
+import PerfDashboardView from './views/PerfDashboardView.vue'
 import PipelineEditor from './components/PipelineEditor.vue'
 import './topology.css'
 import { useTheme } from './composables/useTheme.js'
@@ -17,7 +20,7 @@ import { createMockApi } from './mock/api.js'
 import { createHttpApi } from './api/createHttpApi.js'
 import { createSeed, enrichEnvironments, environmentIdsFor, deviceIdsFor } from './mock/seed.js'
 
-const navGroups = [{ label: '总览', items: [{ id: 'dashboard', label: '总览', icon: 'home' }] }, { label: '资源管理', items: [{ id: 'environments', label: '环境资源', icon: 'box' }, { id: 'leases', label: '借用管理', icon: 'lock' }, { id: 'devices', label: '设备资产', icon: 'monitor' }, { id: 'topology', label: '环境拓扑', icon: 'flow' }, { id: 'maintenance', label: '环境维护', icon: 'shield' }] }, { label: '流水线编排', items: [{ id: 'pipelines', label: '标准流水线', icon: 'flow' }, { label: '升级流水线', icon: 'download', planned: true }, { label: '性能流水线', icon: 'play', planned: true }] }, { label: '数据平台', items: [{ id: 'runs', label: '测试执行记录', icon: 'clipboard' }, { id: 'quality', label: '质量分析', icon: 'chart' }, { label: '性能数据看板', icon: 'pulse', planned: true }] }, { label: '平台管理', items: [{ id: 'people', label: '人员管理', icon: 'user', adminOnly: true }] }]
+const navGroups = [{ label: '总览', items: [{ id: 'dashboard', label: '总览', icon: 'home' }] }, { label: '资源管理', items: [{ id: 'environments', label: '环境资源', icon: 'box' }, { id: 'leases', label: '借用管理', icon: 'lock' }, { id: 'devices', label: '设备资产', icon: 'monitor' }, { id: 'topology', label: '环境拓扑', icon: 'flow' }, { id: 'maintenance', label: '环境维护', icon: 'shield' }] }, { label: '流水线编排', items: [{ id: 'pipelines', label: '标准流水线', icon: 'flow' }, { id: 'upgrades', label: '升级流水线', icon: 'download' }, { id: 'perf', label: '性能流水线', icon: 'play' }] }, { label: '数据平台', items: [{ id: 'runs', label: '测试执行记录', icon: 'clipboard' }, { id: 'quality', label: '质量分析', icon: 'chart' }, { id: 'perf-dashboard', label: '性能数据看板', icon: 'pulse' }] }, { label: '平台管理', items: [{ id: 'people', label: '人员管理', icon: 'user', adminOnly: true }] }]
 const navigation = navGroups.flatMap(g => g.items)
 const getPage = () => navigation.some(n => n.id === location.hash.slice(2)) ? location.hash.slice(2) : 'environments'
 const page = ref(getPage()), mobileOpen = ref(false)
@@ -360,7 +363,11 @@ onBeforeUnmount(() => { clearInterval(runPoll); clearTimeout(toastTimer); window
       <div v-show="page === 'pipelines' && !pipelineEditor"><PipelinesView :snapshot="poolSnapshot" :envs="envs" :mode="dataMode" :can-admin="isAdmin" @pipeline="pipeline" @edit="editPipeline" @copy="copyPipeline" /></div>
       <PipelineEditor v-if="page === 'pipelines' && pipelineEditor" ref="pipelineEditorView" :snapshot="poolSnapshot" :envs="envs" :pipeline="pipelineEditor.pipeline" :example="pipelineEditor.example" :mode="dataMode" :save="savePipeline" :validate="validatePipeline" @close="closePipelineEditor" />
       <TopologyView v-if="page === 'topology'" ref="topologyView" :snapshot="poolSnapshot" :mode="dataMode" :save="saveTopology" :refresh="refreshTopology" @environment="details" @device="device => editResource('device', device)" />
-      <WorkspaceView v-if="!['environments', 'dashboard', 'pipelines', 'topology'].includes(page)" :page="page" :envs="envs" :snapshot="poolSnapshot" :current-user="currentUser" :can-admin="isAdmin" @details="details" @run="runDetails" @lease="leaseDetails" @borrow="borrow" @maintenance="maintenance" @issue="issue => open('issue', issue.id)" @device-create="editResource('device')" @device-edit="device => editResource('device', device)" @device-remove="device => confirmArchive('device', device)" @user-add="open('userAdd')" @user-role="(user, role) => action(() => api.setUserRole(user.id, role), `已将 ${user.name} 设为${roleLabel({ role })}。`)" @user-status="(user, status) => action(() => api.setUserStatus(user.id, status), `已${status === 'disabled' ? '停用' : '启用'} ${user.name}。`)" @user-switch="switchUser" />
+      <!-- 升级 / 性能流水线与性能看板为规划页 · Mock 实现：数据由页面内演示 store 提供，不经过 HTTP 后端。 -->
+      <UpgradePipelinesView v-if="page === 'upgrades'" :envs="envs" :current-user="currentUser" :can-admin="isAdmin" />
+      <PerfPipelinesView v-if="page === 'perf'" :envs="envs" :current-user="currentUser" :can-admin="isAdmin" />
+      <PerfDashboardView v-if="page === 'perf-dashboard'" />
+      <WorkspaceView v-if="!['environments', 'dashboard', 'pipelines', 'topology', 'upgrades', 'perf', 'perf-dashboard'].includes(page)" :page="page" :envs="envs" :snapshot="poolSnapshot" :current-user="currentUser" :can-admin="isAdmin" @details="details" @run="runDetails" @lease="leaseDetails" @borrow="borrow" @maintenance="maintenance" @issue="issue => open('issue', issue.id)" @device-create="editResource('device')" @device-edit="device => editResource('device', device)" @device-remove="device => confirmArchive('device', device)" @user-add="open('userAdd')" @user-role="(user, role) => action(() => api.setUserRole(user.id, role), `已将 ${user.name} 设为${roleLabel({ role })}。`)" @user-status="(user, status) => action(() => api.setUserStatus(user.id, status), `已${status === 'disabled' ? '停用' : '启用'} ${user.name}。`)" @user-switch="switchUser" />
       <footer class="app-footer"><span><i class="dot teal" />ARGUS · 本地演示工作空间</span><span>演示资产 · {{ dataMode === 'http' && snapshot.scheduler?.configured ? (snapshot.scheduler.kind === 'mock' ? 'Jenkins HTTP Mock' : 'Jenkins 已配置') : '未接入真实设备与外部执行' }}</span><button class="text-button" @click="load"><Icon name="refresh" :size="13" />刷新数据</button></footer>
     </template></main></div>
   </div>
