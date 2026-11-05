@@ -1,8 +1,8 @@
 """Argus 后端入口：REST /api + MCP /mcp 双入口，共用领域服务层。"""
 from __future__ import annotations
 
-from contextlib import asynccontextmanager
 import asyncio
+from contextlib import asynccontextmanager
 
 from .config import settings
 from .jenkins_worker import serve
@@ -29,7 +29,8 @@ async def lifespan(_: FastAPI):
     # MCP streamable HTTP 的 session manager 必须随宿主 lifespan 启停（挂载的子应用不会自启）。
     async with mcp.session_manager.run():
         stop = asyncio.Event()
-        worker = asyncio.create_task(serve(stop)) if settings().jenkins_worker_enabled and settings().jenkins_url else None
+        worker = asyncio.create_task(serve(stop)) if (
+            settings().jenkins_worker_enabled and settings().jenkins_url) else None
         try:
             yield
         finally:

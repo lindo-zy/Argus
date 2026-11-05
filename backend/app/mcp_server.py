@@ -267,29 +267,44 @@ def list_events(entity_type: str = "", entity_id: str = "", limit: int = 20,
     return _run(handler)
 
 
-@mcp.tool(description="复制流水线为独立 DAG 草稿，不触发任务。")
-def copy_pipeline(pipeline_id: str, ctx: Context = None) -> dict:
-    return _run(lambda session: pipeline_service.copy_pipeline(session, _actor(session, ctx).id, pipeline_id))
-
-
-@mcp.tool(description="管理员校验并发布 DAG 配置；不占用设备、不触发 Jenkins。")
-def publish_pipeline(pipeline_id: str, expected_revision: int, content_hash: str, ctx: Context = None) -> dict:
-    return _run(lambda session: pipeline_service.publish_pipeline(session, _actor(session, ctx).id, pipeline_id,
-        {'expectedRevision': expected_revision, 'contentHash': content_hash}))
-
-
-@mcp.tool(description="持久调度 Jenkins DAG。提供唯一 request_key 防止重放；只使用服务端受控 Job。")
-def start_pipeline_run(pipeline_version_id: str, env_id: str, request_key: str, ctx: Context = None) -> dict:
-    return _run(lambda session: run_service.start_run(session, _actor(session, ctx).id,
-        {'pipelineVersionId': pipeline_version_id, 'envId': env_id, 'requestKey': request_key, 'executionMode': 'jenkins'}))
-
-
-@mcp.tool(description="启动演示执行任务：需要已发布流水线版本 ID 与匹配架构的空闲环境。")
+@mcp.tool(description="启动流水线执行：需要已发布流水线版本 ID 与匹配架构的空闲环境；"
+                     "配置 Jenkins 后走动态流水线 API 调度，未配置时为演示模拟。")
 def start_demo_run(pipeline_version_id: str, env_id: str, ctx: Context = None) -> dict:
     def handler(session: Session) -> dict:
         actor = _actor(session, ctx)
         return run_service.start_run(session, actor.id, {"pipelineVersionId": pipeline_version_id,
                                                          "envId": env_id})
+    return _run(handler)
+
+
+@mcp.tool(description="复制流水线为独立 DAG 草稿，不触发任务。")
+def copy_pipeline(pipeline_id: str, ctx: Context = None) -> dict:
+    return _run(lambda session: pipeline_service.copy_pipeline(session, _actor(session, ctx).id, pipeline_id))
+
+
+@mcp.tool(description="发布流水线（仅管理员）：冻结当前草稿版本并尽力同步为 Jenkins 动态 Job。")
+def publish_pipeline(pipeline_id: str, expectedRevision: int, contentHash: str,
+                     ctx: Context = None) -> dict:
+    def handler(session: Session) -> dict:
+        actor = _actor(session, ctx)
+        return pipeline_service.publish_pipeline(session, actor.id, pipeline_id,
+                                                 {"expectedRevision": expectedRevision,
+                                                  "contentHash": contentHash})
+    return _run(handler)
+
+
+@mcp.tool(description="持久调度 Jenkins DAG（节点编排模式）。提供唯一 request_key 防止重放；只使用服务端受控 Job。")
+def start_pipeline_run(pipeline_version_id: str, env_id: str, request_key: str, ctx: Context = None) -> dict:
+    return _run(lambda session: run_service.start_run(session, _actor(session, ctx).id,
+        {'pipelineVersionId': pipeline_version_id, 'envId': env_id, 'requestKey': request_key,
+         'executionMode': 'jenkins'}))
+
+
+@mcp.tool(description="对账运行中的流水线：按 ARGUS_TOKEN 找回 Jenkins queue/build，回同步状态与终态清理。")
+def reconcile_runs(ctx: Context = None) -> dict:
+    def handler(session: Session) -> dict:
+        _actor(session, ctx)
+        return run_service.reconcile_active_runs(session)
     return _run(handler)
 
 

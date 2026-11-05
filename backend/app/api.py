@@ -65,6 +65,14 @@ def validate_pipeline_draft(payload: dict, session: Session = Depends(get_sessio
     return pipeline_service.validate_pipeline(session, actor, payload)
 
 
+@router.post('/pipelines/{pipeline_id}/sync')
+def sync_pipeline_job(pipeline_id: str, session: Session = Depends(get_session),
+                      actor: str = Depends(actor_id_header)) -> dict:
+    """把已发布编排重新同步为 Jenkins Job（创建/更新幂等）；Jenkins 不可达返回当前同步态。"""
+    from .services.provisioning import sync_published_job
+    return commit_and_respond(session, sync_published_job(session, actor, pipeline_id))
+
+
 @router.get("/snapshot")
 def get_snapshot(session: Session = Depends(get_session)) -> dict:
     snap = snapshot_service.build_snapshot(session)
@@ -245,13 +253,19 @@ def verify_maintenance(record_id: str, payload: dict, session: Session = Depends
     return commit_and_respond(session, result)
 
 
-# ---- 执行域（演示模拟） ----
+# ---- 执行域 ----
 
 @router.post("/runs")
 def start_run(payload: dict, session: Session = Depends(get_session),
               actor: str = Depends(actor_id_header)) -> dict:
     result = run_service.start_run(session, actor, payload)
     return commit_and_respond(session, result)
+
+
+@router.post("/runs/reconcile")
+def reconcile_runs(session: Session = Depends(get_session)) -> dict:
+    """手动对账：queue/build 状态回同步与终态清理（后台调度器的同款入口）。"""
+    return commit_and_respond(session, run_service.reconcile_active_runs(session))
 
 
 @router.post("/runs/{run_id}/finish")

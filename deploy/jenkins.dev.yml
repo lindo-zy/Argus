@@ -1,0 +1,21 @@
+# Argus 本地开发 Jenkins（仅本机回环，不用于部署）。
+# 用途：动态流水线编排验证（scripts/verify_jenkins_e2e.py）。数据卷 argus_jenkins_home 持久化。
+# 启动：docker compose -f deploy/jenkins.dev.yml up -d
+# 注意：18080/18081 常被本机其他开发进程占用，默认映射到 18090。
+name: argus-jenkins-dev
+
+services:
+  jenkins:
+    image: jenkins/jenkins:lts
+    container_name: argus-jenkins
+    ports:
+      - "127.0.0.1:18090:8080"
+    volumes:
+      - argus_jenkins_home:/var/jenkins_home
+      - ./jenkins-dev.groovy:/usr/share/jenkins/ref/init.groovy.d/basic-security.groovy:ro
+    environment:
+      JAVA_OPTS: "-Djenkins.install.runSetupWizard=false -Dfile.encoding=UTF-8"
+    memory: 1g
+
+volumes:
+  argus_jenkins_home:

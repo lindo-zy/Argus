@@ -221,6 +221,12 @@ class PipelineDefinition(Base):
     connection_ref: Mapped[str] = mapped_column(String(64), default="jenkins-main")
     job_ref: Mapped[str] = mapped_column(String(120), default="")
     architecture: Mapped[str] = mapped_column(String(16), default="x86_64")
+    # 动态流水线同步状态：'' | pending | synced | failed；job_synced_hash 为最近一次同步的配置摘要。
+    job_sync_state: Mapped[str] = mapped_column(String(16), default="")
+    job_synced_hash: Mapped[str] = mapped_column(String(64), default="")
+    # 动态编排同步状态：'' | pending | synced | failed；job_synced_hash 为最近一次同步的配置摘要。
+    job_sync_state: Mapped[str] = mapped_column(String(16), default="")
+    job_synced_hash: Mapped[str] = mapped_column(String(64), default="")
 
 
 class PipelineVersion(Base):
@@ -271,6 +277,25 @@ class PipelineRun(Base):
     ended_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
 
+class PipelineExecution(Base):
+    """Immutable run input and durable per-node attempts; each node submits at most once.
+
+    Existing BackgroundTask owns the renewable worker claim. JSON is replaced, never
+    mutated in place, so SQLAlchemy persists each state transition. created_at 为
+    动态流水线路径补充的意图创建时间（迁移增量列）。
+    """
+    __tablename__ = "pipeline_executions"
+    run_id: Mapped[str] = mapped_column(String(64), ForeignKey("pipeline_runs.id"), primary_key=True)
+    actor_id: Mapped[str] = mapped_column(String(64), nullable=False)
+    request_key: Mapped[str] = mapped_column(String(128), nullable=False)
+    request_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    snapshot: Mapped[dict] = mapped_column(JSONB, nullable=False)
+    nodes: Mapped[list] = mapped_column(JSONB, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False,
+                                                 server_default=func.now())
+    __table_args__ = (UniqueConstraint("actor_id", "request_key", name="uq_execution_request"),)
+
+
 class BackgroundTask(Base):
     """持久任务登记；jenkins_dag 使用 owner/claim_until 认领、轮询与崩溃恢复。"""
 
@@ -286,19 +311,3 @@ class BackgroundTask(Base):
     claim_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     dedupe_key: Mapped[str] = mapped_column(String(128), default="")
     last_error: Mapped[str] = mapped_column(Text, default="")
-
-
-class PipelineExecution(Base):
-    """Immutable run input and durable per-node attempts; each node submits at most once.
-
-    Existing BackgroundTask owns the renewable worker claim. JSON is replaced, never
-    mutated in place, so SQLAlchemy persists each state transition.
-    """
-    __tablename__ = "pipeline_executions"
-    run_id: Mapped[str] = mapped_column(String(64), ForeignKey("pipeline_runs.id"), primary_key=True)
-    actor_id: Mapped[str] = mapped_column(String(64), nullable=False)
-    request_key: Mapped[str] = mapped_column(String(128), nullable=False)
-    request_hash: Mapped[str] = mapped_column(String(64), nullable=False)
-    snapshot: Mapped[dict] = mapped_column(JSONB, nullable=False)
-    nodes: Mapped[list] = mapped_column(JSONB, nullable=False)
-    __table_args__ = (UniqueConstraint("actor_id", "request_key", name="uq_execution_request"),)
